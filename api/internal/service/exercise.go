@@ -2,60 +2,29 @@ package service
 
 import (
 	"context"
-	"errors"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"myvibesfit/api/internal/domain"
-	"myvibesfit/api/internal/repository/db"
 )
 
 type ExerciseService struct {
-	q db.Querier
+	repo domain.ExerciseRepository
 }
 
-func NewExerciseService(q db.Querier) *ExerciseService {
-	return &ExerciseService{q: q}
+func NewExerciseService(repo domain.ExerciseRepository) *ExerciseService {
+	return &ExerciseService{repo: repo}
 }
 
-type ListExercisesFilter struct {
-	OrgID   *uuid.UUID
-	Pattern string
-	Muscle  string
-	Limit   int32
-	Offset  int32
+func (s *ExerciseService) List(ctx context.Context, f domain.ExerciseFilter) ([]domain.Exercise, error) {
+	if f.Limit <= 0 || f.Limit > 100 {
+		f.Limit = 50
+	}
+	return s.repo.List(ctx, f)
 }
 
-func (s *ExerciseService) List(ctx context.Context, f ListExercisesFilter) ([]db.Exercise, error) {
-	limit := f.Limit
-	if limit <= 0 || limit > 100 {
-		limit = 50
-	}
-
-	params := db.ListExercisesParams{
-		OrgID:       uuidToPg(f.OrgID),
-		Muscle:      textToPg(f.Muscle),
-		LimitCount:  limit,
-		OffsetCount: f.Offset,
-	}
-	if f.Pattern != "" {
-		params.Pattern = db.NullMovementPattern{MovementPattern: db.MovementPattern(f.Pattern), Valid: true}
-	}
-
-	return s.q.ListExercises(ctx, params)
-}
-
-func (s *ExerciseService) Get(ctx context.Context, id uuid.UUID) (db.Exercise, error) {
-	ex, err := s.q.GetExerciseByID(ctx, id)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return db.Exercise{}, domain.ErrNotFound
-		}
-		return db.Exercise{}, err
-	}
-	return ex, nil
+func (s *ExerciseService) Get(ctx context.Context, id uuid.UUID) (domain.Exercise, error) {
+	return s.repo.GetByID(ctx, id)
 }
 
 type CreateExerciseInput struct {
@@ -77,46 +46,24 @@ type CreateExerciseInput struct {
 	CreatedBy        uuid.UUID
 }
 
-func (s *ExerciseService) Create(ctx context.Context, in CreateExerciseInput) (db.Exercise, error) {
+func (s *ExerciseService) Create(ctx context.Context, in CreateExerciseInput) (domain.Exercise, error) {
 	if in.Slug == "" || in.Name == "" || in.PrimaryMuscle == "" || in.Pattern == "" {
-		return db.Exercise{}, domain.ErrInvalidInput
+		return domain.Exercise{}, domain.ErrInvalidInput
 	}
 
-	mechanic := db.ExerciseMechanic(in.Mechanic)
-	if mechanic == "" {
-		mechanic = db.ExerciseMechanicCompound
-	}
-	difficulty := db.ExperienceLevel(in.Difficulty)
-	if difficulty == "" {
-		difficulty = db.ExperienceLevelBeginner
-	}
-	tracking := db.TrackingMode(in.Tracking)
-	if tracking == "" {
-		tracking = db.TrackingModeWeightReps
-	}
-
-	return s.q.CreateExercise(ctx, db.CreateExerciseParams{
-		OrgID:            uuidToPg(in.OrgID),
-		Slug:             in.Slug,
-		Name:             in.Name,
-		Description:      textToPg(in.Description),
-		Instructions:     nonNilSlice(in.Instructions),
-		Pattern:          db.MovementPattern(in.Pattern),
-		Mechanic:         mechanic,
-		PrimaryMuscle:    in.PrimaryMuscle,
-		SecondaryMuscles: nonNilSlice(in.SecondaryMuscles),
-		Equipment:        nonNilSlice(in.Equipment),
-		Difficulty:       difficulty,
-		Tracking:         tracking,
-		IsUnilateral:     in.IsUnilateral,
-		VideoUrl:         textToPg(in.VideoURL),
-		ThumbnailUrl:     textToPg(in.ThumbnailURL),
-		CreatedBy:        uuidToPg(&in.CreatedBy),
+	createdBy := in.CreatedBy
+	return s.repo.Create(ctx, domain.Exercise{
+		OrgID: in.OrgID, Slug: in.Slug, Name: in.Name, Description: in.Description, Instructions: nonNilSlice(in.Instructions),
+		Pattern: in.Pattern, Mechanic: stringOrDefault(in.Mechanic, domain.DefaultExerciseMechanic),
+		PrimaryMuscle: in.PrimaryMuscle, SecondaryMuscles: nonNilSlice(in.SecondaryMuscles), Equipment: nonNilSlice(in.Equipment),
+		Difficulty: stringOrDefault(in.Difficulty, domain.DefaultExperienceLevel), Tracking: stringOrDefault(in.Tracking, domain.DefaultTrackingMode),
+		IsUnilateral: in.IsUnilateral, VideoURL: in.VideoURL, ThumbnailURL: in.ThumbnailURL, CreatedBy: &createdBy,
 	})
 }
 
 type UpdateExerciseInput struct {
 	ID               uuid.UUID
+	OrgID            uuid.UUID
 	Name             string
 	Description      string
 	Instructions     []string
@@ -132,58 +79,22 @@ type UpdateExerciseInput struct {
 	ThumbnailURL     string
 }
 
-func (s *ExerciseService) Update(ctx context.Context, in UpdateExerciseInput) (db.Exercise, error) {
+func (s *ExerciseService) Update(ctx context.Context, in UpdateExerciseInput) (domain.Exercise, error) {
 	if in.Name == "" || in.PrimaryMuscle == "" || in.Pattern == "" {
-		return db.Exercise{}, domain.ErrInvalidInput
+		return domain.Exercise{}, domain.ErrInvalidInput
 	}
 
-	mechanic := db.ExerciseMechanic(in.Mechanic)
-	if mechanic == "" {
-		mechanic = db.ExerciseMechanicCompound
-	}
-	difficulty := db.ExperienceLevel(in.Difficulty)
-	if difficulty == "" {
-		difficulty = db.ExperienceLevelBeginner
-	}
-	tracking := db.TrackingMode(in.Tracking)
-	if tracking == "" {
-		tracking = db.TrackingModeWeightReps
-	}
-
-	ex, err := s.q.UpdateExercise(ctx, db.UpdateExerciseParams{
-		ID:               in.ID,
-		Name:             in.Name,
-		Description:      textToPg(in.Description),
-		Instructions:     nonNilSlice(in.Instructions),
-		Pattern:          db.MovementPattern(in.Pattern),
-		Mechanic:         mechanic,
-		PrimaryMuscle:    in.PrimaryMuscle,
-		SecondaryMuscles: nonNilSlice(in.SecondaryMuscles),
-		Equipment:        nonNilSlice(in.Equipment),
-		Difficulty:       difficulty,
-		Tracking:         tracking,
-		IsUnilateral:     in.IsUnilateral,
-		VideoUrl:         textToPg(in.VideoURL),
-		ThumbnailUrl:     textToPg(in.ThumbnailURL),
+	return s.repo.Update(ctx, in.OrgID, domain.Exercise{
+		ID: in.ID, Name: in.Name, Description: in.Description, Instructions: nonNilSlice(in.Instructions),
+		Pattern: in.Pattern, Mechanic: stringOrDefault(in.Mechanic, domain.DefaultExerciseMechanic),
+		PrimaryMuscle: in.PrimaryMuscle, SecondaryMuscles: nonNilSlice(in.SecondaryMuscles), Equipment: nonNilSlice(in.Equipment),
+		Difficulty: stringOrDefault(in.Difficulty, domain.DefaultExperienceLevel), Tracking: stringOrDefault(in.Tracking, domain.DefaultTrackingMode),
+		IsUnilateral: in.IsUnilateral, VideoURL: in.VideoURL, ThumbnailURL: in.ThumbnailURL,
 	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return db.Exercise{}, domain.ErrNotFound
-		}
-		return db.Exercise{}, err
-	}
-	return ex, nil
 }
 
-func (s *ExerciseService) Deactivate(ctx context.Context, id uuid.UUID) error {
-	return s.q.DeactivateExercise(ctx, id)
-}
-
-func uuidToPg(id *uuid.UUID) pgtype.UUID {
-	if id == nil {
-		return pgtype.UUID{}
-	}
-	return pgtype.UUID{Bytes: *id, Valid: true}
+func (s *ExerciseService) Deactivate(ctx context.Context, id, orgID uuid.UUID) error {
+	return s.repo.Deactivate(ctx, id, orgID)
 }
 
 // nonNilSlice evita mandar NULL a columnas text[] NOT NULL cuando el
@@ -195,9 +106,9 @@ func nonNilSlice(s []string) []string {
 	return s
 }
 
-func textToPg(s string) pgtype.Text {
-	if s == "" {
-		return pgtype.Text{}
+func stringOrDefault(v, fallback string) string {
+	if v == "" {
+		return fallback
 	}
-	return pgtype.Text{String: s, Valid: true}
+	return v
 }

@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "api",
+      "runtimeExecutable": "F:\\Proyectos\\Myvibesfit\\run-api.cmd",
+      "runtimeArgs": [],
+      "port": 8080
+    },
+    {
+      "name": "flutter-app",
+      "runtimeExecutable": "F:\\Proyectos\\Myvibesfit\\run-flutter-web.cmd",
+      "runtimeArgs": [],
+      "port": 5555
+    },
+    {
+      "name": "coach-web",
+      "runtimeExecutable": "F:\\Proyectos\\Myvibesfit\\run-coach-web.cmd",
+      "runtimeArgs": [],
+      "port": 3000
+    }
+  ]
+}

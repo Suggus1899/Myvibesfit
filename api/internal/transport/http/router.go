@@ -6,6 +6,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/cors"
+	"github.com/go-chi/httprate"
 
 	"myvibesfit/api/internal/platform"
 	"myvibesfit/api/internal/transport/http/handler"
@@ -21,22 +23,37 @@ type Handlers struct {
 	Progress     *handler.ProgressHandler
 	Habit        *handler.HabitHandler
 	Gamification *handler.GamificationHandler
+	Coach        *handler.CoachHandler
+	AISuggestion *handler.AISuggestionHandler
 }
 
-func NewRouter(h Handlers, signer *platform.JWTSigner) http.Handler {
+func NewRouter(h Handlers, signer *platform.JWTSigner, corsOrigins []string) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(chimw.RequestID)
 	r.Use(chimw.RealIP)
 	r.Use(chimw.Recoverer)
 	r.Use(chimw.Timeout(30 * time.Second))
+	r.Use(httprate.LimitByIP(300, time.Minute))
+	if len(corsOrigins) > 0 {
+		r.Use(cors.Handler(cors.Options{
+			AllowedOrigins:   corsOrigins,
+			AllowedMethods:   []string{"GET", "POST", "PATCH", "DELETE", "OPTIONS"},
+			AllowedHeaders:   []string{"Authorization", "Content-Type"},
+			AllowCredentials: false,
+			MaxAge:           300,
+		}))
+	}
 
 	r.Get("/health", handler.Health)
 
 	r.Route("/v1", func(r chi.Router) {
-		r.Post("/auth/register", h.Auth.Register)
-		r.Post("/auth/login", h.Auth.Login)
-		r.Post("/auth/refresh", h.Auth.Refresh)
+		r.Group(func(r chi.Router) {
+			r.Use(httprate.LimitByIP(10, time.Minute))
+			r.Post("/auth/register", h.Auth.Register)
+			r.Post("/auth/login", h.Auth.Login)
+			r.Post("/auth/refresh", h.Auth.Refresh)
+		})
 
 		r.Group(func(r chi.Router) {
 			r.Use(appmw.OptionalAuth(signer))
@@ -71,8 +88,12 @@ func NewRouter(h Handlers, signer *platform.JWTSigner) http.Handler {
 			r.Group(func(r chi.Router) {
 				r.Use(appmw.RequireRole("owner", "admin", "coach"))
 				r.Post("/exercises", h.Exercise.Create)
-				r.Patch("/exercises/{id}", h.Exercise.Update)
-				r.Delete("/exercises/{id}", h.Exercise.Delete)
+
+				r.Group(func(r chi.Router) {
+					r.Use(appmw.RequireOrg)
+					r.Patch("/exercises/{id}", h.Exercise.Update)
+					r.Delete("/exercises/{id}", h.Exercise.Delete)
+				})
 			})
 
 			r.Group(func(r chi.Router) {
@@ -101,6 +122,12 @@ func NewRouter(h Handlers, signer *platform.JWTSigner) http.Handler {
 				r.Delete("/program-exercises/{id}", h.Program.DeleteExercise)
 
 				r.Post("/assignments/{id}/cancel", h.Assignment.Cancel)
+
+				r.Get("/coach/clients", h.Coach.Clients)
+
+				r.Get("/coach/suggestions", h.AISuggestion.ListPending)
+				r.Post("/ai-suggestions/{id}/approve", h.AISuggestion.Approve)
+				r.Post("/ai-suggestions/{id}/reject", h.AISuggestion.Reject)
 			})
 		})
 	})

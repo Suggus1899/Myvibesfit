@@ -35,7 +35,7 @@ func (h *HabitHandler) List(w http.ResponseWriter, r *http.Request) {
 	for i, hb := range habits {
 		out[i] = dto.HabitDTO{
 			ID: hb.ID, Slug: hb.Slug, Name: hb.Name, Icon: hb.Icon,
-			Unit: string(hb.Unit), DefaultTarget: hb.DefaultTarget, IsSystem: hb.IsSystem,
+			Unit: hb.Unit, DefaultTarget: hb.DefaultTarget, IsSystem: hb.IsSystem,
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -60,7 +60,7 @@ func (h *HabitHandler) MyHabits(w http.ResponseWriter, r *http.Request) {
 		}
 		out[i] = dto.MyHabitDTO{
 			ID: row.ID, HabitID: row.HabitID, Name: row.HabitName, Icon: row.HabitIcon,
-			Unit: string(row.HabitUnit), TargetValue: row.TargetValue, Frequency: string(row.Frequency), DaysOfWeek: days,
+			Unit: row.HabitUnit, TargetValue: row.TargetValue, Frequency: row.Frequency, DaysOfWeek: days,
 		}
 	}
 	writeJSON(w, http.StatusOK, out)

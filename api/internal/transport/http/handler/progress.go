@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 
 	"myvibesfit/api/internal/domain"
-	"myvibesfit/api/internal/repository/db"
 	"myvibesfit/api/internal/service"
 	"myvibesfit/api/internal/transport/http/dto"
 	"myvibesfit/api/internal/transport/http/middleware"
@@ -51,7 +50,7 @@ func (h *ProgressHandler) ExerciseHistory(w http.ResponseWriter, r *http.Request
 	for i, l := range logs {
 		out[i] = dto.SetLogDTO{
 			ID: l.ID, ExerciseID: l.ExerciseID, SetNumber: int(l.SetNumber), Type: string(l.Type),
-			WeightKg: l.WeightKg, Reps: pgInt2Ptr(l.Reps), RPE: l.Rpe, PerformedAt: l.PerformedAt,
+			WeightKg: l.WeightKg, Reps: l.Reps, RPE: l.RPE, PerformedAt: l.PerformedAt,
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -103,7 +102,7 @@ func (h *ProgressHandler) Volume(w http.ResponseWriter, r *http.Request) {
 	out := make([]dto.VolumePointDTO, len(sessions))
 	for i, s := range sessions {
 		out[i] = dto.VolumePointDTO{
-			SessionID: s.ID, StartedAt: s.StartedAt, TotalVolumeKg: s.TotalVolumeKg, DurationSeconds: pgInt4Ptr(s.DurationSeconds),
+			SessionID: s.ID, StartedAt: s.StartedAt, TotalVolumeKg: s.TotalVolumeKg, DurationSeconds: s.DurationSeconds,
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -159,9 +158,9 @@ func (h *ProgressHandler) ListBodyMetrics(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, out)
 }
 
-func bodyMetricDTO(m db.BodyMetric) dto.BodyMetricDTO {
+func bodyMetricDTO(m domain.BodyMetric) dto.BodyMetricDTO {
 	return dto.BodyMetricDTO{
-		MeasuredOn: m.MeasuredOn.Format(dateLayout), WeightKg: m.WeightKg, BodyFatPct: m.BodyFatPct, Note: pgText(m.Note),
+		MeasuredOn: m.MeasuredOn.Format(dateLayout), WeightKg: m.WeightKg, BodyFatPct: m.BodyFatPct, Note: m.Note,
 	}
 }
 

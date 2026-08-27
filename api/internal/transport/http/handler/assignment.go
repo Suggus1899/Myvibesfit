@@ -8,7 +8,6 @@ import (
 	"github.com/google/uuid"
 
 	"myvibesfit/api/internal/domain"
-	"myvibesfit/api/internal/repository/db"
 	"myvibesfit/api/internal/service"
 	"myvibesfit/api/internal/transport/http/dto"
 	"myvibesfit/api/internal/transport/http/middleware"
@@ -60,8 +59,9 @@ func (h *AssignmentHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	orgID, _ := middleware.OrgID(r.Context())
+	actorID, _ := middleware.UserID(r.Context())
 
-	a, err := h.svc.Cancel(r.Context(), id, orgID)
+	a, err := h.svc.Cancel(r.Context(), id, orgID, actorID)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -84,11 +84,11 @@ func (h *AssignmentHandler) CurrentForMe(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, assignmentDetailDTO(detail))
 }
 
-func assignmentDTO(a db.Assignment) dto.AssignmentDTO {
+func assignmentDTO(a domain.Assignment) dto.AssignmentDTO {
 	return dto.AssignmentDTO{
-		ID: a.ID, ProgramID: pgUUIDPtr(a.ProgramID), ClientUserID: a.ClientUserID,
-		CoachUserID: pgUUIDPtr(a.CoachUserID), Name: a.Name, StartDate: a.StartDate.Format(dateLayout),
-		EndDate: datePtrToString(a.EndDate), Status: string(a.Status),
+		ID: a.ID, ProgramID: a.ProgramID, ClientUserID: a.ClientUserID,
+		CoachUserID: a.CoachUserID, Name: a.Name, StartDate: a.StartDate.Format(dateLayout),
+		EndDate: datePtrToString(a.EndDate), Status: a.Status,
 	}
 }
 
@@ -102,16 +102,16 @@ func assignmentDetailDTO(d service.AssignmentDetail) dto.AssignmentDetailDTO {
 		for j, e := range w.Exercises {
 			exercises[j] = dto.AssignedExerciseDTO{
 				ID: e.ID, ExerciseID: e.ExerciseID, OrderIndex: int(e.OrderIndex),
-				SupersetGroup: pgInt2Ptr(e.SupersetGroup), TargetSets: int(e.TargetSets),
-				TargetRepsMin: pgInt2Ptr(e.TargetRepsMin), TargetRepsMax: pgInt2Ptr(e.TargetRepsMax),
-				TargetRPE: e.TargetRpe, TargetWeightKg: e.TargetWeightKg, RestSeconds: int(e.RestSeconds),
-				Tempo: pgText(e.Tempo), Note: pgText(e.Note),
+				SupersetGroup: e.SupersetGroup, TargetSets: int(e.TargetSets),
+				TargetRepsMin: e.TargetRepsMin, TargetRepsMax: e.TargetRepsMax,
+				TargetRPE: e.TargetRPE, TargetWeightKg: e.TargetWeightKg, RestSeconds: int(e.RestSeconds),
+				Tempo: e.Tempo, Note: e.Note,
 			}
 		}
 		out.Workouts[i] = dto.AssignedWorkoutDTO{
 			ID: w.Workout.ID, WeekNumber: int(w.Workout.WeekNumber), DayIndex: int(w.Workout.DayIndex),
-			Name: w.Workout.Name, Note: pgText(w.Workout.Note), IsDeload: w.Workout.IsDeload,
-			ScheduledOn: datePtrToString(w.Workout.ScheduledOn), Status: string(w.Workout.Status),
+			Name: w.Workout.Name, Note: w.Workout.Note, IsDeload: w.Workout.IsDeload,
+			ScheduledOn: datePtrToString(w.Workout.ScheduledOn), Status: w.Workout.Status,
 			Exercises: exercises,
 		}
 	}

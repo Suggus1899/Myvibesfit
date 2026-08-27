@@ -7,20 +7,19 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"myvibesfit/api/internal/domain"
-	"myvibesfit/api/internal/repository/db"
 )
 
 type AssignmentService struct {
-	q    db.Querier
-	pool *pgxpool.Pool
+	repo        domain.AssignmentRepository
+	programRepo domain.ProgramRepository
+	uow         domain.UnitOfWork
+	audit       *AuditLogger
 }
 
-func NewAssignmentService(q db.Querier, pool *pgxpool.Pool) *AssignmentService {
-	return &AssignmentService{q: q, pool: pool}
+func NewAssignmentService(repo domain.AssignmentRepository, programRepo domain.ProgramRepository, uow domain.UnitOfWork, audit *AuditLogger) *AssignmentService {
+	return &AssignmentService{repo: repo, programRepo: programRepo, uow: uow, audit: audit}
 }
 
 type AssignInput struct {
@@ -32,150 +31,130 @@ type AssignInput struct {
 }
 
 // Assign copia un programa publicado a una asignacion propia del cliente.
-// Todo corre en una transaccion: si algo falla a mitad de copia, no queda
-// una asignacion a medias. Editar la copia despues nunca toca la plantilla
-// (program/program_workout/program_exercise), porque assigned_* son filas
-// independientes.
-func (s *AssignmentService) Assign(ctx context.Context, in AssignInput) (db.Assignment, error) {
-	program, err := s.q.GetProgramByID(ctx, db.GetProgramByIDParams{ID: in.ProgramID, OrgID: in.OrgID})
+// La lectura de la plantilla (programa/dias/ejercicios) es de solo lectura y
+// corre antes de abrir transaccion; la escritura de assignment/
+// assigned_workout/assigned_exercise corre entera dentro de uow.Execute: si
+// algo falla a mitad de copia, no queda una asignacion a medias.
+func (s *AssignmentService) Assign(ctx context.Context, in AssignInput) (domain.Assignment, error) {
+	program, err := s.programRepo.GetByID(ctx, in.ProgramID, in.OrgID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return db.Assignment{}, domain.ErrNotFound
+		return domain.Assignment{}, err
+	}
+	if program.Status != domain.ProgramStatusPublished {
+		return domain.Assignment{}, fmt.Errorf("%w: el programa debe estar publicado antes de asignarlo", domain.ErrInvalidInput)
+	}
+
+	if _, err := s.repo.GetOrgMembership(ctx, in.OrgID, in.ClientUserID); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return domain.Assignment{}, fmt.Errorf("%w: el cliente no pertenece a este gimnasio", domain.ErrInvalidInput)
 		}
-		return db.Assignment{}, err
-	}
-	if program.Status != db.ProgramStatusPublished {
-		return db.Assignment{}, fmt.Errorf("%w: el programa debe estar publicado antes de asignarlo", domain.ErrInvalidInput)
+		return domain.Assignment{}, err
 	}
 
-	if _, err := s.q.GetOrgMembership(ctx, db.GetOrgMembershipParams{OrgID: in.OrgID, UserID: in.ClientUserID}); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return db.Assignment{}, fmt.Errorf("%w: el cliente no pertenece a este gimnasio", domain.ErrInvalidInput)
-		}
-		return db.Assignment{}, err
+	if _, err := s.repo.GetActiveByClient(ctx, in.ClientUserID); err == nil {
+		return domain.Assignment{}, fmt.Errorf("%w: el cliente ya tiene una asignacion activa", domain.ErrAlreadyExists)
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return domain.Assignment{}, err
 	}
 
-	if _, err := s.q.GetActiveAssignmentByClient(ctx, in.ClientUserID); err == nil {
-		return db.Assignment{}, fmt.Errorf("%w: el cliente ya tiene una asignacion activa", domain.ErrAlreadyExists)
-	} else if !errors.Is(err, pgx.ErrNoRows) {
-		return db.Assignment{}, err
-	}
-
-	workouts, err := s.q.ListProgramWorkouts(ctx, in.ProgramID)
+	workouts, err := s.programRepo.ListWorkouts(ctx, in.ProgramID)
 	if err != nil {
-		return db.Assignment{}, err
+		return domain.Assignment{}, err
 	}
-
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return db.Assignment{}, err
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck // no-op si ya hizo commit
-	qtx := db.New(tx)
-
-	assignment, err := qtx.CreateAssignment(ctx, db.CreateAssignmentParams{
-		OrgID:        in.OrgID,
-		ProgramID:    uuidToPg(&in.ProgramID),
-		ClientUserID: in.ClientUserID,
-		CoachUserID:  uuidToPg(&in.CoachUserID),
-		Name:         program.Name,
-		StartDate:    in.StartDate,
-	})
-	if err != nil {
-		return db.Assignment{}, err
-	}
-
+	exercisesByWorkout := make(map[uuid.UUID][]domain.ProgramExercise, len(workouts))
 	for _, w := range workouts {
-		exercises, err := qtx.ListProgramExercises(ctx, w.ID)
+		exercises, err := s.programRepo.ListExercises(ctx, w.ID)
 		if err != nil {
-			return db.Assignment{}, err
+			return domain.Assignment{}, err
 		}
+		exercisesByWorkout[w.ID] = exercises
+	}
 
-		// day_index es un offset dentro de la semana (1-7), no un dia de
-		// calendario fijo: la fecha real se ancla a start_date.
-		scheduledOn := in.StartDate.AddDate(0, 0, (int(w.WeekNumber)-1)*7+(int(w.DayIndex)-1))
-		aw, err := qtx.CreateAssignedWorkout(ctx, db.CreateAssignedWorkoutParams{
-			AssignmentID:    assignment.ID,
-			SourceWorkoutID: uuidToPg(&w.ID),
-			WeekNumber:      w.WeekNumber,
-			DayIndex:        w.DayIndex,
-			Name:            w.Name,
-			Note:            w.Note,
-			IsDeload:        w.IsDeload,
-			ScheduledOn:     &scheduledOn,
+	var assignment domain.Assignment
+	err = s.uow.Execute(ctx, func(repos domain.TxRepos) error {
+		programID, coachID := in.ProgramID, in.CoachUserID
+		a, err := repos.Assignments.Create(ctx, domain.Assignment{
+			OrgID: in.OrgID, ProgramID: &programID, ClientUserID: in.ClientUserID,
+			CoachUserID: &coachID, Name: program.Name, StartDate: in.StartDate,
 		})
 		if err != nil {
-			return db.Assignment{}, err
+			return err
 		}
+		assignment = a
 
-		for _, pe := range exercises {
-			if _, err := qtx.CreateAssignedExercise(ctx, db.CreateAssignedExerciseParams{
-				AssignedWorkoutID: aw.ID,
-				ExerciseID:        pe.ExerciseID,
-				OrderIndex:        pe.OrderIndex,
-				SupersetGroup:     pe.SupersetGroup,
-				TargetSets:        pe.TargetSets,
-				TargetRepsMin:     pe.TargetRepsMin,
-				TargetRepsMax:     pe.TargetRepsMax,
-				TargetRpe:         pe.TargetRpe,
-				// target_pct_1rm de la plantilla se resuelve a un peso
-				// concreto cuando exista 1RM del cliente (fase 6+); por
-				// ahora queda sin objetivo de peso fijo.
-				TargetWeightKg:    nil,
-				RestSeconds:       pe.RestSeconds,
-				Tempo:             pe.Tempo,
-				Note:              pe.Note,
-				ProgressionRuleID: pe.ProgressionRuleID,
-			}); err != nil {
-				return db.Assignment{}, err
+		for _, w := range workouts {
+			// day_index es un offset dentro de la semana (1-7), no un dia de
+			// calendario fijo: la fecha real se ancla a start_date.
+			scheduledOn := in.StartDate.AddDate(0, 0, (int(w.WeekNumber)-1)*7+(int(w.DayIndex)-1))
+			sourceWorkoutID := w.ID
+			aw, err := repos.Assignments.CreateWorkout(ctx, domain.AssignedWorkout{
+				AssignmentID: a.ID, SourceWorkoutID: &sourceWorkoutID, WeekNumber: w.WeekNumber, DayIndex: w.DayIndex,
+				Name: w.Name, Note: w.Note, IsDeload: w.IsDeload, ScheduledOn: &scheduledOn,
+			})
+			if err != nil {
+				return err
+			}
+
+			for _, pe := range exercisesByWorkout[w.ID] {
+				if _, err := repos.Assignments.CreateExercise(ctx, domain.AssignedExercise{
+					AssignedWorkoutID: aw.ID, ExerciseID: pe.ExerciseID, OrderIndex: pe.OrderIndex,
+					SupersetGroup: pe.SupersetGroup, TargetSets: pe.TargetSets, TargetRepsMin: pe.TargetRepsMin,
+					TargetRepsMax: pe.TargetRepsMax, TargetRPE: pe.TargetRPE,
+					// target_pct_1rm de la plantilla se resuelve a un peso
+					// concreto cuando exista 1RM del cliente (fase 6+); por
+					// ahora queda sin objetivo de peso fijo.
+					TargetWeightKg: nil, RestSeconds: pe.RestSeconds, Tempo: pe.Tempo, Note: pe.Note,
+					ProgressionRuleID: pe.ProgressionRuleID,
+				}); err != nil {
+					return err
+				}
 			}
 		}
+		return nil
+	})
+	if err != nil {
+		return domain.Assignment{}, err
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return db.Assignment{}, err
-	}
+	s.audit.Log(ctx, in.OrgID, in.CoachUserID, "assignment.assign", "assignment", assignment.ID.String(), map[string]any{
+		"program_id": in.ProgramID, "client_user_id": in.ClientUserID,
+	})
 	return assignment, nil
 }
 
-func (s *AssignmentService) Cancel(ctx context.Context, id, orgID uuid.UUID) (db.Assignment, error) {
-	a, err := s.q.CancelAssignment(ctx, db.CancelAssignmentParams{ID: id, OrgID: orgID})
+func (s *AssignmentService) Cancel(ctx context.Context, id, orgID, actorID uuid.UUID) (domain.Assignment, error) {
+	a, err := s.repo.Cancel(ctx, id, orgID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return db.Assignment{}, domain.ErrNotFound
-		}
-		return db.Assignment{}, err
+		return domain.Assignment{}, err
 	}
+	s.audit.Log(ctx, orgID, actorID, "assignment.cancel", "assignment", id.String(), nil)
 	return a, nil
 }
 
 type AssignedWorkoutDetail struct {
-	Workout   db.AssignedWorkout
-	Exercises []db.AssignedExercise
+	Workout   domain.AssignedWorkout
+	Exercises []domain.AssignedExercise
 }
 
 type AssignmentDetail struct {
-	Assignment db.Assignment
+	Assignment domain.Assignment
 	Workouts   []AssignedWorkoutDetail
 }
 
 func (s *AssignmentService) GetCurrentForClient(ctx context.Context, clientID uuid.UUID) (AssignmentDetail, error) {
-	a, err := s.q.GetActiveAssignmentByClient(ctx, clientID)
+	a, err := s.repo.GetActiveByClient(ctx, clientID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return AssignmentDetail{}, domain.ErrNotFound
-		}
 		return AssignmentDetail{}, err
 	}
 
-	workouts, err := s.q.ListAssignedWorkouts(ctx, a.ID)
+	workouts, err := s.repo.ListWorkouts(ctx, a.ID)
 	if err != nil {
 		return AssignmentDetail{}, err
 	}
 
 	detail := AssignmentDetail{Assignment: a, Workouts: make([]AssignedWorkoutDetail, 0, len(workouts))}
 	for _, w := range workouts {
-		exercises, err := s.q.ListAssignedExercises(ctx, w.ID)
+		exercises, err := s.repo.ListExercises(ctx, w.ID)
 		if err != nil {
 			return AssignmentDetail{}, err
 		}

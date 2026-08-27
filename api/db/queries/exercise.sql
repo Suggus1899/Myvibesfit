@@ -22,12 +22,12 @@ RETURNING *;
 
 -- name: UpdateExercise :one
 UPDATE exercise SET
-  name = $2, description = $3, instructions = $4, pattern = $5,
-  mechanic = $6, primary_muscle = $7, secondary_muscles = $8,
-  equipment = $9, difficulty = $10, tracking = $11, is_unilateral = $12,
-  video_url = $13, thumbnail_url = $14
-WHERE id = $1
+  name = $3, description = $4, instructions = $5, pattern = $6,
+  mechanic = $7, primary_muscle = $8, secondary_muscles = $9,
+  equipment = $10, difficulty = $11, tracking = $12, is_unilateral = $13,
+  video_url = $14, thumbnail_url = $15
+WHERE id = $1 AND org_id = $2
 RETURNING *;
 
--- name: DeactivateExercise :exec
-UPDATE exercise SET is_active = false WHERE id = $1;
+-- name: DeactivateExercise :execrows
+UPDATE exercise SET is_active = false WHERE id = $1 AND org_id = $2;

@@ -7,7 +7,6 @@ import (
 	"github.com/google/uuid"
 
 	"myvibesfit/api/internal/domain"
-	"myvibesfit/api/internal/repository/db"
 	"myvibesfit/api/internal/service"
 	"myvibesfit/api/internal/transport/http/dto"
 	"myvibesfit/api/internal/transport/http/middleware"
@@ -85,9 +84,9 @@ func (h *SyncHandler) Sync(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func achievementDTO(a db.Achievement) dto.AchievementDTO {
+func achievementDTO(a domain.Achievement) dto.AchievementDTO {
 	return dto.AchievementDTO{
 		ID: a.ID, Code: a.Code, Name: a.Name, Description: a.Description,
-		Icon: a.Icon, Tier: int(a.Tier), XPReward: int(a.XpReward),
+		Icon: a.Icon, Tier: int(a.Tier), XPReward: int(a.XPReward),
 	}
 }

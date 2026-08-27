@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 
 	"myvibesfit/api/internal/domain"
-	"myvibesfit/api/internal/repository/db"
 	"myvibesfit/api/internal/service"
 	"myvibesfit/api/internal/transport/http/dto"
 	"myvibesfit/api/internal/transport/http/middleware"
@@ -25,7 +24,7 @@ func NewExerciseHandler(svc *service.ExerciseService) *ExerciseHandler {
 
 func (h *ExerciseHandler) List(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	filter := service.ListExercisesFilter{
+	filter := domain.ExerciseFilter{
 		Pattern: q.Get("pattern"),
 		Muscle:  q.Get("muscle"),
 	}
@@ -100,6 +99,11 @@ func (h *ExerciseHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, domain.ErrInvalidInput)
 		return
 	}
+	orgID, ok := middleware.OrgID(r.Context())
+	if !ok {
+		writeError(w, domain.ErrForbidden)
+		return
+	}
 	var req dto.UpdateExerciseRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, domain.ErrInvalidInput)
@@ -107,7 +111,7 @@ func (h *ExerciseHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ex, err := h.svc.Update(r.Context(), service.UpdateExerciseInput{
-		ID: id, Name: req.Name, Description: req.Description, Instructions: req.Instructions,
+		ID: id, OrgID: orgID, Name: req.Name, Description: req.Description, Instructions: req.Instructions,
 		Pattern: req.Pattern, Mechanic: req.Mechanic, PrimaryMuscle: req.PrimaryMuscle,
 		SecondaryMuscles: req.SecondaryMuscles, Equipment: req.Equipment, Difficulty: req.Difficulty,
 		Tracking: req.Tracking, IsUnilateral: req.IsUnilateral, VideoURL: req.VideoURL, ThumbnailURL: req.ThumbnailURL,
@@ -125,32 +129,24 @@ func (h *ExerciseHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, domain.ErrInvalidInput)
 		return
 	}
-	if err := h.svc.Deactivate(r.Context(), id); err != nil {
+	orgID, ok := middleware.OrgID(r.Context())
+	if !ok {
+		writeError(w, domain.ErrForbidden)
+		return
+	}
+	if err := h.svc.Deactivate(r.Context(), id, orgID); err != nil {
 		writeError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func exerciseDTO(e db.Exercise) dto.ExerciseDTO {
-	d := dto.ExerciseDTO{
-		ID: e.ID, Slug: e.Slug, Name: e.Name, Instructions: e.Instructions,
-		Pattern: string(e.Pattern), Mechanic: string(e.Mechanic), PrimaryMuscle: e.PrimaryMuscle,
+func exerciseDTO(e domain.Exercise) dto.ExerciseDTO {
+	return dto.ExerciseDTO{
+		ID: e.ID, OrgID: e.OrgID, Slug: e.Slug, Name: e.Name, Description: e.Description, Instructions: e.Instructions,
+		Pattern: e.Pattern, Mechanic: e.Mechanic, PrimaryMuscle: e.PrimaryMuscle,
 		SecondaryMuscles: e.SecondaryMuscles, Equipment: e.Equipment,
-		Difficulty: string(e.Difficulty), Tracking: string(e.Tracking), IsUnilateral: e.IsUnilateral,
+		Difficulty: e.Difficulty, Tracking: e.Tracking, IsUnilateral: e.IsUnilateral,
+		VideoURL: e.VideoURL, ThumbnailURL: e.ThumbnailURL,
 	}
-	if e.OrgID.Valid {
-		id := uuid.UUID(e.OrgID.Bytes)
-		d.OrgID = &id
-	}
-	if e.Description.Valid {
-		d.Description = e.Description.String
-	}
-	if e.VideoUrl.Valid {
-		d.VideoURL = e.VideoUrl.String
-	}
-	if e.ThumbnailUrl.Valid {
-		d.ThumbnailURL = e.ThumbnailUrl.String
-	}
-	return d
 }

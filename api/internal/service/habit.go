@@ -6,28 +6,26 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 
-	"myvibesfit/api/internal/repository/db"
+	"myvibesfit/api/internal/domain"
 )
 
 type HabitService struct {
-	q    db.Querier
-	pool *pgxpool.Pool
-	gam  *GamificationService
+	repo domain.HabitRepository
+	uow  domain.UnitOfWork
+	gam  *domain.GamificationService
 }
 
-func NewHabitService(q db.Querier, pool *pgxpool.Pool, gam *GamificationService) *HabitService {
-	return &HabitService{q: q, pool: pool, gam: gam}
+func NewHabitService(repo domain.HabitRepository, uow domain.UnitOfWork, gam *domain.GamificationService) *HabitService {
+	return &HabitService{repo: repo, uow: uow, gam: gam}
 }
 
-func (s *HabitService) ListHabits(ctx context.Context, orgID *uuid.UUID) ([]db.Habit, error) {
-	return s.q.ListHabits(ctx, uuidToPg(orgID))
+func (s *HabitService) ListHabits(ctx context.Context, orgID *uuid.UUID) ([]domain.Habit, error) {
+	return s.repo.ListHabits(ctx, orgID)
 }
 
-func (s *HabitService) MyHabits(ctx context.Context, userID uuid.UUID) ([]db.ListMyHabitsRow, error) {
-	return s.q.ListMyHabits(ctx, userID)
+func (s *HabitService) MyHabits(ctx context.Context, userID uuid.UUID) ([]domain.MyHabit, error) {
+	return s.repo.ListMyHabits(ctx, userID)
 }
 
 type SubscribeHabitInput struct {
@@ -41,32 +39,28 @@ type SubscribeHabitInput struct {
 
 // Subscribe es idempotente: si ya existe una suscripcion activa a ese
 // habito, la devuelve en vez de crear una segunda.
-func (s *HabitService) Subscribe(ctx context.Context, in SubscribeHabitInput) (db.ClientHabit, error) {
-	existing, err := s.q.GetActiveClientHabit(ctx, db.GetActiveClientHabitParams{UserID: in.UserID, HabitID: in.HabitID})
+func (s *HabitService) Subscribe(ctx context.Context, in SubscribeHabitInput) (domain.ClientHabit, error) {
+	existing, err := s.repo.GetActiveClientHabit(ctx, in.UserID, in.HabitID)
 	if err == nil {
 		return existing, nil
 	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return db.ClientHabit{}, err
+	if !errors.Is(err, domain.ErrNotFound) {
+		return domain.ClientHabit{}, err
 	}
 
-	freq := db.HabitFrequency(in.Frequency)
-	if freq == "" {
-		freq = db.HabitFrequencyDaily
-	}
 	days := make([]int16, len(in.DaysOfWeek))
 	for i, d := range in.DaysOfWeek {
 		days[i] = int16(d)
 	}
 
-	return s.q.SubscribeHabit(ctx, db.SubscribeHabitParams{
-		UserID: in.UserID, HabitID: in.HabitID, AssignedBy: uuidToPg(in.AssignedBy),
-		TargetValue: in.TargetValue, Frequency: freq, DaysOfWeek: days,
+	return s.repo.SubscribeHabit(ctx, domain.ClientHabit{
+		UserID: in.UserID, HabitID: in.HabitID, AssignedBy: in.AssignedBy,
+		TargetValue: in.TargetValue, Frequency: stringOrDefault(in.Frequency, domain.DefaultHabitFrequency), DaysOfWeek: days,
 	})
 }
 
 func (s *HabitService) Unsubscribe(ctx context.Context, id, userID uuid.UUID) error {
-	return s.q.UnsubscribeHabit(ctx, db.UnsubscribeHabitParams{ID: id, UserID: userID})
+	return s.repo.UnsubscribeHabit(ctx, id, userID)
 }
 
 type LogHabitInput struct {
@@ -79,83 +73,89 @@ type LogHabitInput struct {
 }
 
 type HabitLogResult struct {
-	Log                  db.HabitLog
-	UnlockedAchievements []db.Achievement
+	Log                  domain.HabitLog
+	UnlockedAchievements []domain.Achievement
 }
 
 // LogHabit registra el check-in y, si con este quedan todos los habitos
 // activos del dia cumplidos, otorga XP y avanza la racha de habitos. Todo
-// en una transaccion.
+// dentro de uow.Execute.
 func (s *HabitService) LogHabit(ctx context.Context, in LogHabitInput) (HabitLogResult, error) {
-	tx, err := s.pool.Begin(ctx)
+	owner, err := s.repo.GetClientHabitOwner(ctx, in.ClientHabitID)
 	if err != nil {
 		return HabitLogResult{}, err
 	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	qtx := db.New(tx)
-
-	log, err := qtx.UpsertHabitLog(ctx, db.UpsertHabitLogParams{
-		ClientLocalID: in.ClientLocalID, ClientHabitID: in.ClientHabitID, UserID: in.UserID,
-		LogDate: in.LogDate, Value: in.Value, IsCompleted: in.IsCompleted,
-	})
-	if err != nil {
-		return HabitLogResult{}, err
+	if owner != in.UserID {
+		return HabitLogResult{}, domain.ErrNotFound
 	}
 
-	result := HabitLogResult{Log: log}
+	var result HabitLogResult
 
-	if in.IsCompleted {
-		if err := s.gam.RecordXPEvent(ctx, qtx, in.UserID, db.XpSourceHabit, xpPerHabitCheck, ""); err != nil {
-			return HabitLogResult{}, err
+	err = s.uow.Execute(ctx, func(repos domain.TxRepos) error {
+		log, err := repos.Habits.UpsertLog(ctx, domain.HabitLog{
+			ClientLocalID: in.ClientLocalID, ClientHabitID: in.ClientHabitID, UserID: in.UserID,
+			LogDate: in.LogDate, Value: in.Value, IsCompleted: in.IsCompleted,
+		})
+		if err != nil {
+			return err
 		}
-		if _, err := s.gam.ApplyStatsDelta(ctx, qtx, in.UserID, StatsDelta{XP: xpPerHabitCheck}); err != nil {
-			return HabitLogResult{}, err
+		result = HabitLogResult{Log: log}
+
+		if !in.IsCompleted {
+			return nil
 		}
 
-		active, err := qtx.CountActiveHabitsForUser(ctx, in.UserID)
-		if err != nil {
-			return HabitLogResult{}, err
+		if err := s.gam.RecordXPEvent(ctx, repos.Gamification, in.UserID, domain.XpSourceHabit, domain.XPPerHabitCheck, ""); err != nil {
+			return err
 		}
-		completedToday, err := qtx.CountCompletedHabitLogsForDate(ctx, db.CountCompletedHabitLogsForDateParams{UserID: in.UserID, LogDate: in.LogDate})
+		if _, err := s.gam.ApplyStatsDelta(ctx, repos.Gamification, in.UserID, domain.StatsDelta{XP: domain.XPPerHabitCheck}); err != nil {
+			return err
+		}
+
+		active, err := repos.Habits.CountActiveForUser(ctx, in.UserID)
 		if err != nil {
-			return HabitLogResult{}, err
+			return err
+		}
+		completedToday, err := repos.Habits.CountCompletedLogsForDate(ctx, in.UserID, in.LogDate)
+		if err != nil {
+			return err
 		}
 
 		if active > 0 && completedToday >= active {
-			if _, err := s.gam.BumpStreak(ctx, qtx, in.UserID, db.StreakKindHabit, in.LogDate); err != nil {
-				return HabitLogResult{}, err
+			if _, err := s.gam.BumpStreak(ctx, repos.Gamification, in.UserID, domain.StreakKindHabit, in.LogDate); err != nil {
+				return err
 			}
-			if _, err := s.gam.BumpStreak(ctx, qtx, in.UserID, db.StreakKindOverall, in.LogDate); err != nil {
-				return HabitLogResult{}, err
+			if _, err := s.gam.BumpStreak(ctx, repos.Gamification, in.UserID, domain.StreakKindOverall, in.LogDate); err != nil {
+				return err
 			}
 		}
 
-		stats, err := qtx.GetUserStats(ctx, in.UserID)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return HabitLogResult{}, err
+		stats, err := repos.Gamification.GetUserStats(ctx, in.UserID)
+		if err != nil && !errors.Is(err, domain.ErrNotFound) {
+			return err
 		}
-		habitStreak, err := qtx.GetUserStreak(ctx, db.GetUserStreakParams{UserID: in.UserID, Kind: db.StreakKindWorkout})
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return HabitLogResult{}, err
+		habitStreak, err := repos.Gamification.GetUserStreak(ctx, in.UserID, domain.StreakKindWorkout)
+		if err != nil && !errors.Is(err, domain.ErrNotFound) {
+			return err
 		}
-		unlocked, err := s.gam.CheckAchievements(ctx, qtx, in.UserID, AchievementSnapshot{
+		unlocked, err := s.gam.CheckAchievements(ctx, repos.Gamification, in.UserID, domain.AchievementSnapshot{
 			TotalSessions: int(stats.TotalSessions), WorkoutStreak: int(habitStreak.CurrentCount),
 		})
 		if err != nil {
-			return HabitLogResult{}, err
+			return err
 		}
-		if err := s.gam.GrantAchievementXP(ctx, qtx, in.UserID, unlocked); err != nil {
-			return HabitLogResult{}, err
+		if err := s.gam.GrantAchievementXP(ctx, repos.Gamification, in.UserID, unlocked); err != nil {
+			return err
 		}
 		result.UnlockedAchievements = unlocked
-	}
-
-	if err := tx.Commit(ctx); err != nil {
+		return nil
+	})
+	if err != nil {
 		return HabitLogResult{}, err
 	}
 	return result, nil
 }
 
-func (s *HabitService) LogsForDate(ctx context.Context, userID uuid.UUID, date time.Time) ([]db.HabitLog, error) {
-	return s.q.ListHabitLogsForDate(ctx, db.ListHabitLogsForDateParams{UserID: userID, LogDate: date})
+func (s *HabitService) LogsForDate(ctx context.Context, userID uuid.UUID, date time.Time) ([]domain.HabitLog, error) {
+	return s.repo.ListLogsForDate(ctx, userID, date)
 }

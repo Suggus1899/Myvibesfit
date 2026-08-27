@@ -3,28 +3,25 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"myvibesfit/api/internal/domain"
-	"myvibesfit/api/internal/repository/db"
 )
 
 type ProgramService struct {
-	q db.Querier
+	repo  domain.ProgramRepository
+	audit *AuditLogger
 }
 
-func NewProgramService(q db.Querier) *ProgramService {
-	return &ProgramService{q: q}
+func NewProgramService(repo domain.ProgramRepository, audit *AuditLogger) *ProgramService {
+	return &ProgramService{repo: repo, audit: audit}
 }
 
 // ---- reglas de progresion ----
 
-func (s *ProgramService) ListProgressionRules(ctx context.Context, orgID *uuid.UUID) ([]db.ProgressionRule, error) {
-	return s.q.ListProgressionRules(ctx, uuidToPg(orgID))
+func (s *ProgramService) ListProgressionRules(ctx context.Context, orgID *uuid.UUID) ([]domain.ProgressionRule, error) {
+	return s.repo.ListProgressionRules(ctx, orgID)
 }
 
 type CreateProgressionRuleInput struct {
@@ -34,20 +31,16 @@ type CreateProgressionRuleInput struct {
 	Params json.RawMessage
 }
 
-func (s *ProgramService) CreateProgressionRule(ctx context.Context, in CreateProgressionRuleInput) (db.ProgressionRule, error) {
+func (s *ProgramService) CreateProgressionRule(ctx context.Context, in CreateProgressionRuleInput) (domain.ProgressionRule, error) {
 	if in.Name == "" || in.Type == "" {
-		return db.ProgressionRule{}, domain.ErrInvalidInput
+		return domain.ProgressionRule{}, domain.ErrInvalidInput
 	}
 	params := in.Params
 	if len(params) == 0 {
 		params = []byte("{}")
 	}
-	return s.q.CreateProgressionRule(ctx, db.CreateProgressionRuleParams{
-		OrgID:    uuidToPg(in.OrgID),
-		Name:     in.Name,
-		Type:     db.ProgressionType(in.Type),
-		Params:   params,
-		IsSystem: false,
+	return s.repo.CreateProgressionRule(ctx, domain.ProgressionRule{
+		OrgID: in.OrgID, Name: in.Name, Type: in.Type, Params: params, IsSystem: false,
 	})
 }
 
@@ -64,31 +57,19 @@ type CreateProgramInput struct {
 	DaysPerWeek int
 }
 
-func (s *ProgramService) CreateProgram(ctx context.Context, in CreateProgramInput) (db.Program, error) {
+func (s *ProgramService) CreateProgram(ctx context.Context, in CreateProgramInput) (domain.Program, error) {
 	if in.Name == "" {
-		return db.Program{}, domain.ErrInvalidInput
+		return domain.Program{}, domain.ErrInvalidInput
 	}
-	return s.q.CreateProgram(ctx, db.CreateProgramParams{
-		OrgID:       in.OrgID,
-		CreatedBy:   in.CreatedBy,
-		Name:        in.Name,
-		Description: textToPg(in.Description),
-		Goal:        goalOrDefault(in.Goal),
-		Level:       levelOrDefault(in.Level),
-		TotalWeeks:  int16OrDefault(in.TotalWeeks, 4),
-		DaysPerWeek: int16OrDefault(in.DaysPerWeek, 3),
+	return s.repo.Create(ctx, domain.Program{
+		OrgID: in.OrgID, CreatedBy: in.CreatedBy, Name: in.Name, Description: in.Description,
+		Goal: stringOrDefault(in.Goal, domain.DefaultTrainingGoal), Level: stringOrDefault(in.Level, domain.DefaultExperienceLevel),
+		TotalWeeks: int16OrDefault(in.TotalWeeks, 4), DaysPerWeek: int16OrDefault(in.DaysPerWeek, 3),
 	})
 }
 
-func (s *ProgramService) GetProgram(ctx context.Context, id, orgID uuid.UUID) (db.Program, error) {
-	p, err := s.q.GetProgramByID(ctx, db.GetProgramByIDParams{ID: id, OrgID: orgID})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return db.Program{}, domain.ErrNotFound
-		}
-		return db.Program{}, err
-	}
-	return p, nil
+func (s *ProgramService) GetProgram(ctx context.Context, id, orgID uuid.UUID) (domain.Program, error) {
+	return s.repo.GetByID(ctx, id, orgID)
 }
 
 type ListProgramsFilter struct {
@@ -98,16 +79,12 @@ type ListProgramsFilter struct {
 	Offset int32
 }
 
-func (s *ProgramService) ListPrograms(ctx context.Context, f ListProgramsFilter) ([]db.Program, error) {
+func (s *ProgramService) ListPrograms(ctx context.Context, f ListProgramsFilter) ([]domain.Program, error) {
 	limit := f.Limit
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
-	params := db.ListProgramsByOrgParams{OrgID: f.OrgID, LimitCount: limit, OffsetCount: f.Offset}
-	if f.Status != "" {
-		params.Status = db.NullProgramStatus{ProgramStatus: db.ProgramStatus(f.Status), Valid: true}
-	}
-	return s.q.ListProgramsByOrg(ctx, params)
+	return s.repo.ListByOrg(ctx, domain.ListProgramsFilter{OrgID: f.OrgID, Status: f.Status, Limit: limit, Offset: f.Offset})
 }
 
 type UpdateProgramInput struct {
@@ -121,37 +98,23 @@ type UpdateProgramInput struct {
 	DaysPerWeek int
 }
 
-func (s *ProgramService) UpdateProgram(ctx context.Context, in UpdateProgramInput) (db.Program, error) {
+func (s *ProgramService) UpdateProgram(ctx context.Context, in UpdateProgramInput) (domain.Program, error) {
 	if in.Name == "" {
-		return db.Program{}, domain.ErrInvalidInput
+		return domain.Program{}, domain.ErrInvalidInput
 	}
-	p, err := s.q.UpdateProgram(ctx, db.UpdateProgramParams{
-		ID:          in.ID,
-		OrgID:       in.OrgID,
-		Name:        in.Name,
-		Description: textToPg(in.Description),
-		Goal:        goalOrDefault(in.Goal),
-		Level:       levelOrDefault(in.Level),
-		TotalWeeks:  int16OrDefault(in.TotalWeeks, 4),
-		DaysPerWeek: int16OrDefault(in.DaysPerWeek, 3),
+	return s.repo.Update(ctx, domain.Program{
+		ID: in.ID, OrgID: in.OrgID, Name: in.Name, Description: in.Description,
+		Goal: stringOrDefault(in.Goal, domain.DefaultTrainingGoal), Level: stringOrDefault(in.Level, domain.DefaultExperienceLevel),
+		TotalWeeks: int16OrDefault(in.TotalWeeks, 4), DaysPerWeek: int16OrDefault(in.DaysPerWeek, 3),
 	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return db.Program{}, domain.ErrNotFound
-		}
-		return db.Program{}, err
-	}
-	return p, nil
 }
 
-func (s *ProgramService) SetProgramStatus(ctx context.Context, id, orgID uuid.UUID, status db.ProgramStatus) (db.Program, error) {
-	p, err := s.q.SetProgramStatus(ctx, db.SetProgramStatusParams{ID: id, OrgID: orgID, Status: status})
+func (s *ProgramService) SetProgramStatus(ctx context.Context, id, orgID, actorID uuid.UUID, status domain.ProgramStatus) (domain.Program, error) {
+	p, err := s.repo.SetStatus(ctx, id, orgID, status)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return db.Program{}, domain.ErrNotFound
-		}
-		return db.Program{}, err
+		return domain.Program{}, err
 	}
+	s.audit.Log(ctx, orgID, actorID, "program.set_status", "program", id.String(), map[string]any{"status": status})
 	return p, nil
 }
 
@@ -168,44 +131,36 @@ type CreateProgramWorkoutInput struct {
 	EstimatedMinutes *int
 }
 
-func (s *ProgramService) CreateProgramWorkout(ctx context.Context, in CreateProgramWorkoutInput) (db.ProgramWorkout, error) {
+func (s *ProgramService) CreateProgramWorkout(ctx context.Context, in CreateProgramWorkoutInput) (domain.ProgramWorkout, error) {
 	if in.Name == "" || in.WeekNumber < 1 || in.DayIndex < 1 || in.DayIndex > 7 {
-		return db.ProgramWorkout{}, domain.ErrInvalidInput
+		return domain.ProgramWorkout{}, domain.ErrInvalidInput
 	}
 	if _, err := s.GetProgram(ctx, in.ProgramID, in.OrgID); err != nil {
-		return db.ProgramWorkout{}, err
+		return domain.ProgramWorkout{}, err
 	}
 
-	return s.q.CreateProgramWorkout(ctx, db.CreateProgramWorkoutParams{
-		ProgramID:        in.ProgramID,
-		WeekNumber:       int16(in.WeekNumber),
-		DayIndex:         int16(in.DayIndex),
-		Name:             in.Name,
-		Note:             textToPg(in.Note),
-		IsDeload:         in.IsDeload,
-		EstimatedMinutes: intToPgInt2(in.EstimatedMinutes),
+	return s.repo.CreateWorkout(ctx, domain.ProgramWorkout{
+		ProgramID: in.ProgramID, WeekNumber: int16(in.WeekNumber), DayIndex: int16(in.DayIndex),
+		Name: in.Name, Note: in.Note, IsDeload: in.IsDeload, EstimatedMinutes: in.EstimatedMinutes,
 	})
 }
 
-func (s *ProgramService) ListProgramWorkouts(ctx context.Context, programID, orgID uuid.UUID) ([]db.ProgramWorkout, error) {
+func (s *ProgramService) ListProgramWorkouts(ctx context.Context, programID, orgID uuid.UUID) ([]domain.ProgramWorkout, error) {
 	if _, err := s.GetProgram(ctx, programID, orgID); err != nil {
 		return nil, err
 	}
-	return s.q.ListProgramWorkouts(ctx, programID)
+	return s.repo.ListWorkouts(ctx, programID)
 }
 
-func (s *ProgramService) workoutChecked(ctx context.Context, id, orgID uuid.UUID) (db.GetProgramWorkoutWithOrgRow, error) {
-	row, err := s.q.GetProgramWorkoutWithOrg(ctx, id)
+func (s *ProgramService) workoutChecked(ctx context.Context, id, orgID uuid.UUID) error {
+	workoutOrgID, err := s.repo.GetWorkoutOrgID(ctx, id)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return db.GetProgramWorkoutWithOrgRow{}, domain.ErrNotFound
-		}
-		return db.GetProgramWorkoutWithOrgRow{}, err
+		return err
 	}
-	if row.ProgramOrgID != orgID {
-		return db.GetProgramWorkoutWithOrgRow{}, domain.ErrNotFound
+	if workoutOrgID != orgID {
+		return domain.ErrNotFound
 	}
-	return row, nil
+	return nil
 }
 
 type UpdateProgramWorkoutInput struct {
@@ -217,27 +172,23 @@ type UpdateProgramWorkoutInput struct {
 	EstimatedMinutes *int
 }
 
-func (s *ProgramService) UpdateProgramWorkout(ctx context.Context, in UpdateProgramWorkoutInput) (db.ProgramWorkout, error) {
+func (s *ProgramService) UpdateProgramWorkout(ctx context.Context, in UpdateProgramWorkoutInput) (domain.ProgramWorkout, error) {
 	if in.Name == "" {
-		return db.ProgramWorkout{}, domain.ErrInvalidInput
+		return domain.ProgramWorkout{}, domain.ErrInvalidInput
 	}
-	if _, err := s.workoutChecked(ctx, in.ID, in.OrgID); err != nil {
-		return db.ProgramWorkout{}, err
+	if err := s.workoutChecked(ctx, in.ID, in.OrgID); err != nil {
+		return domain.ProgramWorkout{}, err
 	}
-	return s.q.UpdateProgramWorkout(ctx, db.UpdateProgramWorkoutParams{
-		ID:               in.ID,
-		Name:             in.Name,
-		Note:             textToPg(in.Note),
-		IsDeload:         in.IsDeload,
-		EstimatedMinutes: intToPgInt2(in.EstimatedMinutes),
+	return s.repo.UpdateWorkout(ctx, domain.ProgramWorkout{
+		ID: in.ID, Name: in.Name, Note: in.Note, IsDeload: in.IsDeload, EstimatedMinutes: in.EstimatedMinutes,
 	})
 }
 
 func (s *ProgramService) DeleteProgramWorkout(ctx context.Context, id, orgID uuid.UUID) error {
-	if _, err := s.workoutChecked(ctx, id, orgID); err != nil {
+	if err := s.workoutChecked(ctx, id, orgID); err != nil {
 		return err
 	}
-	return s.q.DeleteProgramWorkout(ctx, id)
+	return s.repo.DeleteWorkout(ctx, id)
 }
 
 // ---- ejercicios del dia (program_exercise) ----
@@ -259,47 +210,35 @@ type CreateProgramExerciseInput struct {
 	ProgressionRuleID *uuid.UUID
 }
 
-func (s *ProgramService) CreateProgramExercise(ctx context.Context, in CreateProgramExerciseInput) (db.ProgramExercise, error) {
-	if _, err := s.workoutChecked(ctx, in.ProgramWorkoutID, in.OrgID); err != nil {
-		return db.ProgramExercise{}, err
+func (s *ProgramService) CreateProgramExercise(ctx context.Context, in CreateProgramExerciseInput) (domain.ProgramExercise, error) {
+	if err := s.workoutChecked(ctx, in.ProgramWorkoutID, in.OrgID); err != nil {
+		return domain.ProgramExercise{}, err
 	}
 
-	return s.q.CreateProgramExercise(ctx, db.CreateProgramExerciseParams{
-		ProgramWorkoutID:  in.ProgramWorkoutID,
-		ExerciseID:        in.ExerciseID,
-		OrderIndex:        int16(in.OrderIndex),
-		SupersetGroup:     intToPgInt2(in.SupersetGroup),
-		TargetSets:        int16OrDefault(in.TargetSets, 3),
-		TargetRepsMin:     intToPgInt2(in.TargetRepsMin),
-		TargetRepsMax:     intToPgInt2(in.TargetRepsMax),
-		TargetRpe:         in.TargetRPE,
-		TargetPct1rm:      in.TargetPct1RM,
-		RestSeconds:       int16OrDefault(in.RestSeconds, 90),
-		Tempo:             textToPg(in.Tempo),
-		Note:              textToPg(in.Note),
-		ProgressionRuleID: uuidToPg(in.ProgressionRuleID),
+	return s.repo.CreateExercise(ctx, domain.ProgramExercise{
+		ProgramWorkoutID: in.ProgramWorkoutID, ExerciseID: in.ExerciseID, OrderIndex: int16(in.OrderIndex),
+		SupersetGroup: in.SupersetGroup, TargetSets: int16OrDefault(in.TargetSets, 3), TargetRepsMin: in.TargetRepsMin,
+		TargetRepsMax: in.TargetRepsMax, TargetRPE: in.TargetRPE, TargetPct1RM: in.TargetPct1RM,
+		RestSeconds: int16OrDefault(in.RestSeconds, 90), Tempo: in.Tempo, Note: in.Note, ProgressionRuleID: in.ProgressionRuleID,
 	})
 }
 
-func (s *ProgramService) ListProgramExercises(ctx context.Context, workoutID, orgID uuid.UUID) ([]db.ProgramExercise, error) {
-	if _, err := s.workoutChecked(ctx, workoutID, orgID); err != nil {
+func (s *ProgramService) ListProgramExercises(ctx context.Context, workoutID, orgID uuid.UUID) ([]domain.ProgramExercise, error) {
+	if err := s.workoutChecked(ctx, workoutID, orgID); err != nil {
 		return nil, err
 	}
-	return s.q.ListProgramExercises(ctx, workoutID)
+	return s.repo.ListExercises(ctx, workoutID)
 }
 
-func (s *ProgramService) exerciseChecked(ctx context.Context, id, orgID uuid.UUID) (db.GetProgramExerciseWithOrgRow, error) {
-	row, err := s.q.GetProgramExerciseWithOrg(ctx, id)
+func (s *ProgramService) exerciseChecked(ctx context.Context, id, orgID uuid.UUID) error {
+	exerciseOrgID, err := s.repo.GetExerciseOrgID(ctx, id)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return db.GetProgramExerciseWithOrgRow{}, domain.ErrNotFound
-		}
-		return db.GetProgramExerciseWithOrgRow{}, err
+		return err
 	}
-	if row.ProgramOrgID != orgID {
-		return db.GetProgramExerciseWithOrgRow{}, domain.ErrNotFound
+	if exerciseOrgID != orgID {
+		return domain.ErrNotFound
 	}
-	return row, nil
+	return nil
 }
 
 type UpdateProgramExerciseInput struct {
@@ -318,46 +257,23 @@ type UpdateProgramExerciseInput struct {
 	ProgressionRuleID *uuid.UUID
 }
 
-func (s *ProgramService) UpdateProgramExercise(ctx context.Context, in UpdateProgramExerciseInput) (db.ProgramExercise, error) {
-	if _, err := s.exerciseChecked(ctx, in.ID, in.OrgID); err != nil {
-		return db.ProgramExercise{}, err
+func (s *ProgramService) UpdateProgramExercise(ctx context.Context, in UpdateProgramExerciseInput) (domain.ProgramExercise, error) {
+	if err := s.exerciseChecked(ctx, in.ID, in.OrgID); err != nil {
+		return domain.ProgramExercise{}, err
 	}
 
-	return s.q.UpdateProgramExercise(ctx, db.UpdateProgramExerciseParams{
-		ID:                in.ID,
-		OrderIndex:        int16(in.OrderIndex),
-		SupersetGroup:     intToPgInt2(in.SupersetGroup),
-		TargetSets:        int16OrDefault(in.TargetSets, 3),
-		TargetRepsMin:     intToPgInt2(in.TargetRepsMin),
-		TargetRepsMax:     intToPgInt2(in.TargetRepsMax),
-		TargetRpe:         in.TargetRPE,
-		TargetPct1rm:      in.TargetPct1RM,
-		RestSeconds:       int16OrDefault(in.RestSeconds, 90),
-		Tempo:             textToPg(in.Tempo),
-		Note:              textToPg(in.Note),
-		ProgressionRuleID: uuidToPg(in.ProgressionRuleID),
+	return s.repo.UpdateExercise(ctx, domain.ProgramExercise{
+		ID: in.ID, OrderIndex: int16(in.OrderIndex), SupersetGroup: in.SupersetGroup, TargetSets: int16OrDefault(in.TargetSets, 3),
+		TargetRepsMin: in.TargetRepsMin, TargetRepsMax: in.TargetRepsMax, TargetRPE: in.TargetRPE, TargetPct1RM: in.TargetPct1RM,
+		RestSeconds: int16OrDefault(in.RestSeconds, 90), Tempo: in.Tempo, Note: in.Note, ProgressionRuleID: in.ProgressionRuleID,
 	})
 }
 
 func (s *ProgramService) DeleteProgramExercise(ctx context.Context, id, orgID uuid.UUID) error {
-	if _, err := s.exerciseChecked(ctx, id, orgID); err != nil {
+	if err := s.exerciseChecked(ctx, id, orgID); err != nil {
 		return err
 	}
-	return s.q.DeleteProgramExercise(ctx, id)
-}
-
-func goalOrDefault(v string) db.TrainingGoal {
-	if v == "" {
-		return db.TrainingGoalGeneralHealth
-	}
-	return db.TrainingGoal(v)
-}
-
-func levelOrDefault(v string) db.ExperienceLevel {
-	if v == "" {
-		return db.ExperienceLevelBeginner
-	}
-	return db.ExperienceLevel(v)
+	return s.repo.DeleteExercise(ctx, id)
 }
 
 func int16OrDefault(v int, fallback int16) int16 {
@@ -365,11 +281,4 @@ func int16OrDefault(v int, fallback int16) int16 {
 		return fallback
 	}
 	return int16(v)
-}
-
-func intToPgInt2(v *int) pgtype.Int2 {
-	if v == nil {
-		return pgtype.Int2{}
-	}
-	return pgtype.Int2{Int16: int16(*v), Valid: true}
 }

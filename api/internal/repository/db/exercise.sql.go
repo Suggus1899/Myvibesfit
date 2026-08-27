@@ -87,13 +87,21 @@ func (q *Queries) CreateExercise(ctx context.Context, arg CreateExerciseParams) 
 	return i, err
 }
 
-const deactivateExercise = `-- name: DeactivateExercise :exec
-UPDATE exercise SET is_active = false WHERE id = $1
+const deactivateExercise = `-- name: DeactivateExercise :execrows
+UPDATE exercise SET is_active = false WHERE id = $1 AND org_id = $2
 `
 
-func (q *Queries) DeactivateExercise(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, deactivateExercise, id)
-	return err
+type DeactivateExerciseParams struct {
+	ID    uuid.UUID   `json:"id"`
+	OrgID pgtype.UUID `json:"org_id"`
+}
+
+func (q *Queries) DeactivateExercise(ctx context.Context, arg DeactivateExerciseParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deactivateExercise, arg.ID, arg.OrgID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const getExerciseByID = `-- name: GetExerciseByID :one
@@ -195,16 +203,17 @@ func (q *Queries) ListExercises(ctx context.Context, arg ListExercisesParams) ([
 
 const updateExercise = `-- name: UpdateExercise :one
 UPDATE exercise SET
-  name = $2, description = $3, instructions = $4, pattern = $5,
-  mechanic = $6, primary_muscle = $7, secondary_muscles = $8,
-  equipment = $9, difficulty = $10, tracking = $11, is_unilateral = $12,
-  video_url = $13, thumbnail_url = $14
-WHERE id = $1
+  name = $3, description = $4, instructions = $5, pattern = $6,
+  mechanic = $7, primary_muscle = $8, secondary_muscles = $9,
+  equipment = $10, difficulty = $11, tracking = $12, is_unilateral = $13,
+  video_url = $14, thumbnail_url = $15
+WHERE id = $1 AND org_id = $2
 RETURNING id, org_id, slug, name, description, instructions, pattern, mechanic, primary_muscle, secondary_muscles, equipment, difficulty, tracking, is_unilateral, video_url, thumbnail_url, created_by, is_active, created_at, updated_at
 `
 
 type UpdateExerciseParams struct {
 	ID               uuid.UUID        `json:"id"`
+	OrgID            pgtype.UUID      `json:"org_id"`
 	Name             string           `json:"name"`
 	Description      pgtype.Text      `json:"description"`
 	Instructions     []string         `json:"instructions"`
@@ -223,6 +232,7 @@ type UpdateExerciseParams struct {
 func (q *Queries) UpdateExercise(ctx context.Context, arg UpdateExerciseParams) (Exercise, error) {
 	row := q.db.QueryRow(ctx, updateExercise,
 		arg.ID,
+		arg.OrgID,
 		arg.Name,
 		arg.Description,
 		arg.Instructions,

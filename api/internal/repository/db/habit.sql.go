@@ -69,6 +69,17 @@ func (q *Queries) GetActiveClientHabit(ctx context.Context, arg GetActiveClientH
 	return i, err
 }
 
+const getClientHabitOwner = `-- name: GetClientHabitOwner :one
+SELECT user_id FROM client_habit WHERE id = $1
+`
+
+func (q *Queries) GetClientHabitOwner(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getClientHabitOwner, id)
+	var user_id uuid.UUID
+	err := row.Scan(&user_id)
+	return user_id, err
+}
+
 const getHabitByID = `-- name: GetHabitByID :one
 SELECT id, org_id, slug, name, icon, unit, default_target, is_system, created_at FROM habit WHERE id = $1
 `

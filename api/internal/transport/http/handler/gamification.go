@@ -5,19 +5,17 @@ import (
 	"time"
 
 	"myvibesfit/api/internal/domain"
-	"myvibesfit/api/internal/repository/db"
-	"myvibesfit/api/internal/service"
 	"myvibesfit/api/internal/transport/http/dto"
 	"myvibesfit/api/internal/transport/http/middleware"
 )
 
 type GamificationHandler struct {
-	q   db.Querier
-	gam *service.GamificationService
+	repo domain.GamificationRepository
+	gam  *domain.GamificationService
 }
 
-func NewGamificationHandler(q db.Querier, gam *service.GamificationService) *GamificationHandler {
-	return &GamificationHandler{q: q, gam: gam}
+func NewGamificationHandler(repo domain.GamificationRepository, gam *domain.GamificationService) *GamificationHandler {
+	return &GamificationHandler{repo: repo, gam: gam}
 }
 
 func (h *GamificationHandler) Stats(w http.ResponseWriter, r *http.Request) {
@@ -27,19 +25,19 @@ func (h *GamificationHandler) Stats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stats, streaks, err := h.gam.Stats(r.Context(), h.q, userID)
+	stats, streaks, err := h.gam.Stats(r.Context(), h.repo, userID)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
 
 	out := dto.UserStatsDTO{
-		TotalXP: int(stats.TotalXp), Level: int(stats.Level),
+		TotalXP: int(stats.TotalXP), Level: int(stats.Level),
 		TotalSessions: int(stats.TotalSessions), TotalVolumeKg: stats.TotalVolumeKg,
 	}
 	for _, s := range streaks {
 		out.Streaks = append(out.Streaks, dto.StreakDTO{
-			Kind: string(s.Kind), CurrentCount: int(s.CurrentCount), LongestCount: int(s.LongestCount),
+			Kind: s.Kind, CurrentCount: int(s.CurrentCount), LongestCount: int(s.LongestCount),
 			LastActiveOn: datePtrToString(s.LastActiveOn),
 		})
 	}
@@ -53,7 +51,7 @@ func (h *GamificationHandler) Achievements(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	rows, err := h.gam.MyAchievements(r.Context(), h.q, userID)
+	rows, err := h.gam.MyAchievements(r.Context(), h.repo, userID)
 	if err != nil {
 		writeError(w, err)
 		return

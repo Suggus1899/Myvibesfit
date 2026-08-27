@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 
 	"myvibesfit/api/internal/domain"
-	"myvibesfit/api/internal/repository/db"
 	"myvibesfit/api/internal/service"
 	"myvibesfit/api/internal/transport/http/dto"
 	"myvibesfit/api/internal/transport/http/middleware"
@@ -60,9 +59,9 @@ func (h *ProgramHandler) CreateProgressionRule(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusCreated, progressionRuleDTO(rule))
 }
 
-func progressionRuleDTO(r db.ProgressionRule) dto.ProgressionRuleDTO {
+func progressionRuleDTO(r domain.ProgressionRule) dto.ProgressionRuleDTO {
 	return dto.ProgressionRuleDTO{
-		ID: r.ID, OrgID: pgUUIDPtr(r.OrgID), Name: r.Name, Type: string(r.Type),
+		ID: r.ID, OrgID: r.OrgID, Name: r.Name, Type: r.Type,
 		Params: json.RawMessage(r.Params), IsSystem: r.IsSystem,
 	}
 }
@@ -154,22 +153,23 @@ func (h *ProgramHandler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ProgramHandler) Publish(w http.ResponseWriter, r *http.Request) {
-	h.setStatus(w, r, db.ProgramStatusPublished)
+	h.setStatus(w, r, domain.ProgramStatusPublished)
 }
 
 func (h *ProgramHandler) Archive(w http.ResponseWriter, r *http.Request) {
-	h.setStatus(w, r, db.ProgramStatusArchived)
+	h.setStatus(w, r, domain.ProgramStatusArchived)
 }
 
-func (h *ProgramHandler) setStatus(w http.ResponseWriter, r *http.Request, status db.ProgramStatus) {
+func (h *ProgramHandler) setStatus(w http.ResponseWriter, r *http.Request, status domain.ProgramStatus) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		writeError(w, domain.ErrInvalidInput)
 		return
 	}
 	orgID, _ := middleware.OrgID(r.Context())
+	actorID, _ := middleware.UserID(r.Context())
 
-	p, err := h.svc.SetProgramStatus(r.Context(), id, orgID, status)
+	p, err := h.svc.SetProgramStatus(r.Context(), id, orgID, actorID, status)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -177,10 +177,10 @@ func (h *ProgramHandler) setStatus(w http.ResponseWriter, r *http.Request, statu
 	writeJSON(w, http.StatusOK, programDTO(p))
 }
 
-func programDTO(p db.Program) dto.ProgramDTO {
+func programDTO(p domain.Program) dto.ProgramDTO {
 	return dto.ProgramDTO{
-		ID: p.ID, OrgID: p.OrgID, Name: p.Name, Description: pgText(p.Description),
-		Goal: string(p.Goal), Level: string(p.Level), TotalWeeks: int(p.TotalWeeks),
+		ID: p.ID, OrgID: p.OrgID, Name: p.Name, Description: p.Description,
+		Goal: p.Goal, Level: p.Level, TotalWeeks: int(p.TotalWeeks),
 		DaysPerWeek: int(p.DaysPerWeek), Status: string(p.Status),
 	}
 }
@@ -270,10 +270,10 @@ func (h *ProgramHandler) DeleteWorkout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func programWorkoutDTO(pw db.ProgramWorkout) dto.ProgramWorkoutDTO {
+func programWorkoutDTO(pw domain.ProgramWorkout) dto.ProgramWorkoutDTO {
 	return dto.ProgramWorkoutDTO{
 		ID: pw.ID, ProgramID: pw.ProgramID, WeekNumber: int(pw.WeekNumber), DayIndex: int(pw.DayIndex),
-		Name: pw.Name, Note: pgText(pw.Note), IsDeload: pw.IsDeload, EstimatedMinutes: pgInt2Ptr(pw.EstimatedMinutes),
+		Name: pw.Name, Note: pw.Note, IsDeload: pw.IsDeload, EstimatedMinutes: pw.EstimatedMinutes,
 	}
 }
 
@@ -366,13 +366,13 @@ func (h *ProgramHandler) DeleteExercise(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func programExerciseDTO(pe db.ProgramExercise) dto.ProgramExerciseDTO {
+func programExerciseDTO(pe domain.ProgramExercise) dto.ProgramExerciseDTO {
 	return dto.ProgramExerciseDTO{
 		ID: pe.ID, ProgramWorkoutID: pe.ProgramWorkoutID, ExerciseID: pe.ExerciseID,
-		OrderIndex: int(pe.OrderIndex), SupersetGroup: pgInt2Ptr(pe.SupersetGroup),
-		TargetSets: int(pe.TargetSets), TargetRepsMin: pgInt2Ptr(pe.TargetRepsMin),
-		TargetRepsMax: pgInt2Ptr(pe.TargetRepsMax), TargetRPE: pe.TargetRpe, TargetPct1RM: pe.TargetPct1rm,
-		RestSeconds: int(pe.RestSeconds), Tempo: pgText(pe.Tempo), Note: pgText(pe.Note),
-		ProgressionRuleID: pgUUIDPtr(pe.ProgressionRuleID),
+		OrderIndex: int(pe.OrderIndex), SupersetGroup: pe.SupersetGroup,
+		TargetSets: int(pe.TargetSets), TargetRepsMin: pe.TargetRepsMin,
+		TargetRepsMax: pe.TargetRepsMax, TargetRPE: pe.TargetRPE, TargetPct1RM: pe.TargetPct1RM,
+		RestSeconds: int(pe.RestSeconds), Tempo: pe.Tempo, Note: pe.Note,
+		ProgressionRuleID: pe.ProgressionRuleID,
 	}
 }

@@ -6,22 +6,17 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"myvibesfit/api/internal/domain"
-	"myvibesfit/api/internal/repository/db"
 )
 
 type SyncService struct {
-	q    db.Querier
-	pool *pgxpool.Pool
-	gam  *GamificationService
+	uow domain.UnitOfWork
+	gam *domain.GamificationService
 }
 
-func NewSyncService(q db.Querier, pool *pgxpool.Pool, gam *GamificationService) *SyncService {
-	return &SyncService{q: q, pool: pool, gam: gam}
+func NewSyncService(uow domain.UnitOfWork, gam *domain.GamificationService) *SyncService {
+	return &SyncService{uow: uow, gam: gam}
 }
 
 type SyncSetInput struct {
@@ -63,195 +58,168 @@ type SyncSessionInput struct {
 }
 
 type SyncResult struct {
-	Sessions             []db.WorkoutSession
+	Sessions             []domain.WorkoutSession
 	NewPersonalRecords   int
-	UnlockedAchievements []db.Achievement
+	UnlockedAchievements []domain.Achievement
 }
 
 // SyncSessions aplica un lote de sesiones de entrenamiento generadas en el
 // movil (posiblemente offline). Cada sesion/serie trae su client_local_id:
-// reenviar el mismo lote nunca duplica filas. Todo corre en una sola
-// transaccion, incluyendo XP/racha/logros, para no dejar estadisticas a
+// reenviar el mismo lote nunca duplica filas. Todo corre dentro de
+// uow.Execute (XP/racha/logros incluidos), para no dejar estadisticas a
 // medias si algo falla.
 func (s *SyncService) SyncSessions(ctx context.Context, userID uuid.UUID, orgID *uuid.UUID, sessions []SyncSessionInput) (SyncResult, error) {
 	if len(sessions) == 0 {
 		return SyncResult{}, domain.ErrInvalidInput
 	}
 
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return SyncResult{}, err
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	qtx := db.New(tx)
-
 	result := SyncResult{}
-	var completedCount int32
-	var completedVolume float64
-	var lastActiveDate time.Time
-	var newPRs bool
 
-	for _, sess := range sessions {
-		volume := sessionVolume(sess)
+	err := s.uow.Execute(ctx, func(repos domain.TxRepos) error {
+		var completedCount int32
+		var completedVolume float64
+		var lastActiveDate time.Time
+		var newPRs bool
 
-		row, err := qtx.UpsertWorkoutSession(ctx, db.UpsertWorkoutSessionParams{
-			ClientLocalID:     sess.ClientLocalID,
-			UserID:            userID,
-			OrgID:             uuidToPg(orgID),
-			AssignedWorkoutID: uuidToPg(sess.AssignedWorkoutID),
-			Name:              sess.Name,
-			Status:            db.SessionStatus(sess.Status),
-			StartedAt:         sess.StartedAt,
-			EndedAt:           sess.EndedAt,
-			DurationSeconds:   intToPgInt4(sess.DurationSeconds),
-			TotalVolumeKg:     volume,
-			PerceivedEffort:   intToPgInt2(sess.PerceivedEffort),
-			Mood:              intToPgInt2(sess.Mood),
-			Notes:             textToPg(sess.Notes),
-		})
-		if err != nil {
-			return SyncResult{}, err
-		}
-		result.Sessions = append(result.Sessions, row)
+		for _, sess := range sessions {
+			volume := sessionVolume(sess)
 
-		for _, ex := range sess.Exercises {
-			se, err := qtx.UpsertSessionExercise(ctx, db.UpsertSessionExerciseParams{
-				SessionID:          row.ID,
-				ExerciseID:         ex.ExerciseID,
-				AssignedExerciseID: uuidToPg(ex.AssignedExerciseID),
-				OrderIndex:         int16(ex.OrderIndex),
-				SupersetGroup:      intToPgInt2(ex.SupersetGroup),
-				Note:               textToPg(ex.Note),
+			row, err := repos.Sessions.UpsertWorkoutSession(ctx, domain.WorkoutSession{
+				ClientLocalID: sess.ClientLocalID, UserID: userID, OrgID: orgID,
+				AssignedWorkoutID: sess.AssignedWorkoutID, Name: sess.Name, Status: domain.SessionStatus(sess.Status),
+				StartedAt: sess.StartedAt, EndedAt: sess.EndedAt, DurationSeconds: sess.DurationSeconds,
+				TotalVolumeKg: volume, PerceivedEffort: sess.PerceivedEffort, Mood: sess.Mood, Notes: sess.Notes,
 			})
 			if err != nil {
-				return SyncResult{}, err
+				return err
 			}
+			result.Sessions = append(result.Sessions, row)
 
-			for _, set := range ex.Sets {
-				setType := db.SetType(set.Type)
-				if setType == "" {
-					setType = db.SetTypeWorking
-				}
-				setRow, err := qtx.UpsertSetLog(ctx, db.UpsertSetLogParams{
-					ClientLocalID:     set.ClientLocalID,
-					SessionExerciseID: se.ID,
-					UserID:            userID,
-					ExerciseID:        ex.ExerciseID,
-					SetNumber:         int16(set.SetNumber),
-					Type:              setType,
-					WeightKg:          set.WeightKg,
-					Reps:              intToPgInt2(set.Reps),
-					Rpe:               set.RPE,
-					Rir:               intToPgInt2(set.RIR),
-					DurationSeconds:   intToPgInt4(set.DurationSeconds),
-					DistanceM:         set.DistanceM,
-					RestTakenSeconds:  intToPgInt4(set.RestTakenSeconds),
-					IsCompleted:       set.IsCompleted,
-					PerformedAt:       set.PerformedAt,
+			for _, ex := range sess.Exercises {
+				se, err := repos.Sessions.UpsertSessionExercise(ctx, domain.SessionExercise{
+					SessionID: row.ID, ExerciseID: ex.ExerciseID, AssignedExerciseID: ex.AssignedExerciseID,
+					OrderIndex: int16(ex.OrderIndex), SupersetGroup: ex.SupersetGroup, Note: ex.Note,
 				})
 				if err != nil {
-					return SyncResult{}, err
+					return err
 				}
 
-				if setType == db.SetTypeWorking && set.IsCompleted && set.WeightKg != nil && set.Reps != nil {
-					beat, err := s.checkPersonalRecords(ctx, qtx, userID, ex.ExerciseID, setRow.ID, *set.WeightKg, *set.Reps, set.PerformedAt)
+				for _, set := range ex.Sets {
+					setType := domain.SetType(set.Type)
+					if setType == "" {
+						setType = domain.SetTypeWorking
+					}
+					setRow, err := repos.Sessions.UpsertSetLog(ctx, domain.SetLog{
+						ClientLocalID: set.ClientLocalID, SessionExerciseID: se.ID, UserID: userID, ExerciseID: ex.ExerciseID,
+						SetNumber: int16(set.SetNumber), Type: setType, WeightKg: set.WeightKg, Reps: set.Reps,
+						RPE: set.RPE, RIR: set.RIR, DurationSeconds: set.DurationSeconds, DistanceM: set.DistanceM,
+						RestTakenSeconds: set.RestTakenSeconds, IsCompleted: set.IsCompleted, PerformedAt: set.PerformedAt,
+					})
 					if err != nil {
-						return SyncResult{}, err
+						return err
 					}
-					if beat {
-						newPRs = true
-						result.NewPersonalRecords++
+
+					if setType == domain.SetTypeWorking && set.IsCompleted && set.WeightKg != nil && set.Reps != nil {
+						beat, err := s.checkPersonalRecords(ctx, repos, userID, ex.ExerciseID, setRow.ID, *set.WeightKg, *set.Reps, set.PerformedAt)
+						if err != nil {
+							return err
+						}
+						if beat {
+							newPRs = true
+							result.NewPersonalRecords++
+						}
 					}
+				}
+			}
+
+			if sess.Status == string(domain.SessionStatusCompleted) {
+				completedCount++
+				completedVolume += volume
+				if sess.StartedAt.After(lastActiveDate) {
+					lastActiveDate = sess.StartedAt
 				}
 			}
 		}
 
-		if sess.Status == string(db.SessionStatusCompleted) {
-			completedCount++
-			completedVolume += volume
-			if sess.StartedAt.After(lastActiveDate) {
-				lastActiveDate = sess.StartedAt
-			}
-		}
-	}
-
-	xpEarned := completedCount * xpPerSession
-	if newPRs {
-		xpEarned += int32(result.NewPersonalRecords) * xpPerPersonalRecord
-	}
-
-	var stats db.UserStat
-	if completedCount > 0 || newPRs {
-		if completedCount > 0 {
-			if err := s.gam.RecordXPEvent(ctx, qtx, userID, db.XpSourceSession, completedCount*xpPerSession, ""); err != nil {
-				return SyncResult{}, err
-			}
-		}
+		xpEarned := completedCount * domain.XPPerSession
 		if newPRs {
-			if err := s.gam.RecordXPEvent(ctx, qtx, userID, db.XpSourcePersonalRecord, int32(result.NewPersonalRecords)*xpPerPersonalRecord, ""); err != nil {
-				return SyncResult{}, err
+			xpEarned += int32(result.NewPersonalRecords) * domain.XPPerPersonalRecord
+		}
+
+		var stats domain.UserStat
+		var err error
+		if completedCount > 0 || newPRs {
+			if completedCount > 0 {
+				if err := s.gam.RecordXPEvent(ctx, repos.Gamification, userID, domain.XpSourceSession, completedCount*domain.XPPerSession, ""); err != nil {
+					return err
+				}
+			}
+			if newPRs {
+				if err := s.gam.RecordXPEvent(ctx, repos.Gamification, userID, domain.XpSourcePersonalRecord, int32(result.NewPersonalRecords)*domain.XPPerPersonalRecord, ""); err != nil {
+					return err
+				}
+			}
+			stats, err = s.gam.ApplyStatsDelta(ctx, repos.Gamification, userID, domain.StatsDelta{XP: xpEarned, Sessions: completedCount, VolumeKg: completedVolume})
+			if err != nil {
+				return err
+			}
+		} else {
+			stats, err = repos.Gamification.GetUserStats(ctx, userID)
+			if err != nil && !errors.Is(err, domain.ErrNotFound) {
+				return err
 			}
 		}
-		stats, err = s.gam.ApplyStatsDelta(ctx, qtx, userID, StatsDelta{XP: xpEarned, Sessions: completedCount, VolumeKg: completedVolume})
-		if err != nil {
-			return SyncResult{}, err
-		}
-	} else {
-		stats, err = qtx.GetUserStats(ctx, userID)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return SyncResult{}, err
-		}
-	}
 
-	workoutStreak := db.UserStreak{}
-	if completedCount > 0 {
-		workoutStreak, err = s.gam.BumpStreak(ctx, qtx, userID, db.StreakKindWorkout, lastActiveDate)
-		if err != nil {
-			return SyncResult{}, err
+		var workoutStreak domain.UserStreak
+		if completedCount > 0 {
+			workoutStreak, err = s.gam.BumpStreak(ctx, repos.Gamification, userID, domain.StreakKindWorkout, lastActiveDate)
+			if err != nil {
+				return err
+			}
+			if _, err := s.gam.BumpStreak(ctx, repos.Gamification, userID, domain.StreakKindOverall, lastActiveDate); err != nil {
+				return err
+			}
 		}
-		if _, err := s.gam.BumpStreak(ctx, qtx, userID, db.StreakKindOverall, lastActiveDate); err != nil {
-			return SyncResult{}, err
-		}
-	}
 
-	if completedCount > 0 || newPRs {
-		unlocked, err := s.gam.CheckAchievements(ctx, qtx, userID, AchievementSnapshot{
-			TotalSessions: int(stats.TotalSessions), WorkoutStreak: int(workoutStreak.CurrentCount), HasNewPR: newPRs,
-		})
-		if err != nil {
-			return SyncResult{}, err
+		if completedCount > 0 || newPRs {
+			unlocked, err := s.gam.CheckAchievements(ctx, repos.Gamification, userID, domain.AchievementSnapshot{
+				TotalSessions: int(stats.TotalSessions), WorkoutStreak: int(workoutStreak.CurrentCount), HasNewPR: newPRs,
+			})
+			if err != nil {
+				return err
+			}
+			if err := s.gam.GrantAchievementXP(ctx, repos.Gamification, userID, unlocked); err != nil {
+				return err
+			}
+			result.UnlockedAchievements = unlocked
 		}
-		if err := s.gam.GrantAchievementXP(ctx, qtx, userID, unlocked); err != nil {
-			return SyncResult{}, err
-		}
-		result.UnlockedAchievements = unlocked
-	}
-
-	if err := tx.Commit(ctx); err != nil {
+		return nil
+	})
+	if err != nil {
 		return SyncResult{}, err
 	}
 	return result, nil
 }
 
-func (s *SyncService) checkPersonalRecords(ctx context.Context, qtx db.Querier, userID, exerciseID uuid.UUID, setLogID int64, weightKg float64, reps int, performedAt time.Time) (bool, error) {
+func (s *SyncService) checkPersonalRecords(ctx context.Context, repos domain.TxRepos, userID, exerciseID uuid.UUID, setLogID int64, weightKg float64, reps int, performedAt time.Time) (bool, error) {
 	beat := false
-	candidates := map[db.RecordType]float64{
-		db.RecordTypeMaxWeight:    weightKg,
-		db.RecordTypeMaxReps:      float64(reps),
-		db.RecordTypeEstimated1rm: weightKg * (1 + float64(reps)/30.0),
-		db.RecordTypeMaxVolumeSet: weightKg * float64(reps),
+	candidates := map[domain.RecordType]float64{
+		domain.RecordTypeMaxWeight:    weightKg,
+		domain.RecordTypeMaxReps:      float64(reps),
+		domain.RecordTypeEstimated1RM: weightKg * (1 + float64(reps)/30.0),
+		domain.RecordTypeMaxVolumeSet: weightKg * float64(reps),
 	}
 	for recordType, value := range candidates {
-		current, err := qtx.GetPersonalRecord(ctx, db.GetPersonalRecordParams{UserID: userID, ExerciseID: exerciseID, Type: recordType})
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		current, err := repos.Sessions.GetPersonalRecord(ctx, userID, exerciseID, recordType)
+		if err != nil && !errors.Is(err, domain.ErrNotFound) {
 			return false, err
 		}
 		if err == nil && current.Value >= value {
 			continue
 		}
-		if _, err := qtx.UpsertPersonalRecord(ctx, db.UpsertPersonalRecordParams{
-			UserID: userID, ExerciseID: exerciseID, Type: recordType, Value: value,
-			SetLogID: pgtype.Int8{Int64: setLogID, Valid: true}, AchievedAt: performedAt,
+		logID := setLogID
+		if _, err := repos.Sessions.UpsertPersonalRecord(ctx, domain.PersonalRecord{
+			UserID: userID, ExerciseID: exerciseID, Type: recordType, Value: value, SetLogID: &logID, AchievedAt: performedAt,
 		}); err != nil {
 			return false, err
 		}
@@ -274,11 +242,4 @@ func sessionVolume(sess SyncSessionInput) float64 {
 		}
 	}
 	return total
-}
-
-func intToPgInt4(v *int) pgtype.Int4 {
-	if v == nil {
-		return pgtype.Int4{}
-	}
-	return pgtype.Int4{Int32: int32(*v), Valid: true}
 }

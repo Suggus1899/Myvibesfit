@@ -7,32 +7,29 @@ import (
 	"github.com/google/uuid"
 
 	"myvibesfit/api/internal/domain"
-	"myvibesfit/api/internal/repository/db"
 )
 
 type ProgressService struct {
-	q db.Querier
+	repo domain.ProgressRepository
 }
 
-func NewProgressService(q db.Querier) *ProgressService {
-	return &ProgressService{q: q}
+func NewProgressService(repo domain.ProgressRepository) *ProgressService {
+	return &ProgressService{repo: repo}
 }
 
-func (s *ProgressService) ExerciseHistory(ctx context.Context, userID, exerciseID uuid.UUID, since time.Time, limit int32) ([]db.SetLog, error) {
+func (s *ProgressService) ExerciseHistory(ctx context.Context, userID, exerciseID uuid.UUID, since time.Time, limit int32) ([]domain.SetLog, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 200
 	}
-	return s.q.ListSetLogsForExercise(ctx, db.ListSetLogsForExerciseParams{
-		UserID: userID, ExerciseID: exerciseID, PerformedAt: since, Limit: limit,
-	})
+	return s.repo.ListSetLogsForExercise(ctx, userID, exerciseID, since, limit)
 }
 
-func (s *ProgressService) Records(ctx context.Context, userID uuid.UUID, exerciseID *uuid.UUID) ([]db.PersonalRecord, error) {
-	return s.q.ListPersonalRecords(ctx, db.ListPersonalRecordsParams{UserID: userID, ExerciseID: uuidToPg(exerciseID)})
+func (s *ProgressService) Records(ctx context.Context, userID uuid.UUID, exerciseID *uuid.UUID) ([]domain.PersonalRecord, error) {
+	return s.repo.ListPersonalRecords(ctx, userID, exerciseID)
 }
 
-func (s *ProgressService) Volume(ctx context.Context, userID uuid.UUID, since time.Time) ([]db.ListSessionsForVolumeRow, error) {
-	return s.q.ListSessionsForVolume(ctx, db.ListSessionsForVolumeParams{UserID: userID, StartedAt: since})
+func (s *ProgressService) Volume(ctx context.Context, userID uuid.UUID, since time.Time) ([]domain.SessionVolumePoint, error) {
+	return s.repo.ListSessionsForVolume(ctx, userID, since)
 }
 
 type BodyMetricInput struct {
@@ -43,19 +40,18 @@ type BodyMetricInput struct {
 	Note       string
 }
 
-func (s *ProgressService) LogBodyMetric(ctx context.Context, in BodyMetricInput) (db.BodyMetric, error) {
+func (s *ProgressService) LogBodyMetric(ctx context.Context, in BodyMetricInput) (domain.BodyMetric, error) {
 	if in.WeightKg == nil && in.BodyFatPct == nil {
-		return db.BodyMetric{}, domain.ErrInvalidInput
+		return domain.BodyMetric{}, domain.ErrInvalidInput
 	}
-	return s.q.UpsertBodyMetric(ctx, db.UpsertBodyMetricParams{
-		UserID: in.UserID, MeasuredOn: in.MeasuredOn, WeightKg: in.WeightKg,
-		BodyFatPct: in.BodyFatPct, Note: textToPg(in.Note),
+	return s.repo.UpsertBodyMetric(ctx, domain.BodyMetric{
+		UserID: in.UserID, MeasuredOn: in.MeasuredOn, WeightKg: in.WeightKg, BodyFatPct: in.BodyFatPct, Note: in.Note,
 	})
 }
 
-func (s *ProgressService) BodyMetrics(ctx context.Context, userID uuid.UUID, limit int32) ([]db.BodyMetric, error) {
+func (s *ProgressService) BodyMetrics(ctx context.Context, userID uuid.UUID, limit int32) ([]domain.BodyMetric, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	return s.q.ListBodyMetrics(ctx, db.ListBodyMetricsParams{UserID: userID, Limit: limit})
+	return s.repo.ListBodyMetrics(ctx, userID, limit)
 }

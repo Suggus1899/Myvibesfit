@@ -9,6 +9,9 @@ SELECT * FROM habit WHERE id = $1;
 -- name: GetActiveClientHabit :one
 SELECT * FROM client_habit WHERE user_id = $1 AND habit_id = $2 AND ended_on IS NULL;
 
+-- name: GetClientHabitOwner :one
+SELECT user_id FROM client_habit WHERE id = $1;
+
 -- name: SubscribeHabit :one
 INSERT INTO client_habit (user_id, habit_id, assigned_by, target_value, frequency, days_of_week)
 VALUES ($1, $2, $3, $4, $5, $6)
