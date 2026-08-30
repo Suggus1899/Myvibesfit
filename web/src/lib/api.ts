@@ -27,7 +27,7 @@ export class ApiError extends Error {
 export type LoginResponse = {
   access_token: string;
   refresh_token: string;
-  user: { id: string; email: string; full_name: string };
+  user: { id: string; email: string; full_name: string; org_id?: string | null; role?: string };
 };
 
 export async function login(email: string, password: string): Promise<LoginResponse> {
@@ -37,6 +37,16 @@ export async function login(email: string, password: string): Promise<LoginRespo
     body: JSON.stringify({ email, password }),
   });
   if (!res.ok) throw new ApiError(res.status, "Credenciales invalidas");
+  return res.json();
+}
+
+export async function register(email: string, password: string, fullName: string): Promise<LoginResponse> {
+  const res = await fetch(`${API_URL}/v1/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password, full_name: fullName }),
+  });
+  if (!res.ok) throw new ApiError(res.status, "No se pudo crear la cuenta");
   return res.json();
 }
 

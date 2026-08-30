@@ -7,7 +7,9 @@ import { clearTokens } from "@/lib/api";
 
 const TABS = [
   { href: "/dashboard", label: "Clientes" },
+  { href: "/programs", label: "Programas" },
   { href: "/suggestions", label: "Sugerencias IA" },
+  { href: "/members", label: "Miembros" },
 ];
 
 export function Nav() {
