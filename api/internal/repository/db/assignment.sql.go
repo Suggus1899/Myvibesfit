@@ -51,7 +51,7 @@ INSERT INTO assigned_exercise (
 ) VALUES (
   $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
 )
-RETURNING id, assigned_workout_id, exercise_id, order_index, superset_group, target_sets, target_reps_min, target_reps_max, target_rpe, target_weight_kg, rest_seconds, tempo, note, progression_rule_id
+RETURNING id, assigned_workout_id, exercise_id, order_index, superset_group, target_sets, target_reps_min, target_reps_max, target_rpe, target_weight_kg, rest_seconds, tempo, note, progression_rule_id, override_source
 `
 
 type CreateAssignedExerciseParams struct {
@@ -102,6 +102,7 @@ func (q *Queries) CreateAssignedExercise(ctx context.Context, arg CreateAssigned
 		&i.Tempo,
 		&i.Note,
 		&i.ProgressionRuleID,
+		&i.OverrideSource,
 	)
 	return i, err
 }
@@ -191,6 +192,48 @@ func (q *Queries) CreateAssignment(ctx context.Context, arg CreateAssignmentPara
 	return i, err
 }
 
+const findNextAssignedExercise = `-- name: FindNextAssignedExercise :one
+SELECT ae.id, ae.assigned_workout_id, ae.exercise_id, ae.order_index, ae.superset_group, ae.target_sets, ae.target_reps_min, ae.target_reps_max, ae.target_rpe, ae.target_weight_kg, ae.rest_seconds, ae.tempo, ae.note, ae.progression_rule_id, ae.override_source FROM assigned_exercise ae
+JOIN assigned_workout aw ON aw.id = ae.assigned_workout_id
+WHERE aw.assignment_id = $1
+  AND ae.exercise_id = $2
+  AND ae.assigned_workout_id <> $3
+  AND aw.status <> 'completed'
+ORDER BY aw.week_number, aw.day_index, ae.order_index
+LIMIT 1
+`
+
+type FindNextAssignedExerciseParams struct {
+	AssignmentID      uuid.UUID `json:"assignment_id"`
+	ExerciseID        uuid.UUID `json:"exercise_id"`
+	AssignedWorkoutID uuid.UUID `json:"assigned_workout_id"`
+}
+
+// La proxima vez que este ejercicio aparece en el plan, saltando el dia que
+// se acaba de entrenar (excluded_workout_id) y los ya completados.
+func (q *Queries) FindNextAssignedExercise(ctx context.Context, arg FindNextAssignedExerciseParams) (AssignedExercise, error) {
+	row := q.db.QueryRow(ctx, findNextAssignedExercise, arg.AssignmentID, arg.ExerciseID, arg.AssignedWorkoutID)
+	var i AssignedExercise
+	err := row.Scan(
+		&i.ID,
+		&i.AssignedWorkoutID,
+		&i.ExerciseID,
+		&i.OrderIndex,
+		&i.SupersetGroup,
+		&i.TargetSets,
+		&i.TargetRepsMin,
+		&i.TargetRepsMax,
+		&i.TargetRpe,
+		&i.TargetWeightKg,
+		&i.RestSeconds,
+		&i.Tempo,
+		&i.Note,
+		&i.ProgressionRuleID,
+		&i.OverrideSource,
+	)
+	return i, err
+}
+
 const getActiveAssignmentByClient = `-- name: GetActiveAssignmentByClient :one
 SELECT id, org_id, program_id, client_user_id, coach_user_id, name, start_date, end_date, status, created_at, updated_at FROM assignment WHERE client_user_id = $1 AND status = 'active'
 `
@@ -263,8 +306,19 @@ func (q *Queries) GetOrgMembership(ctx context.Context, arg GetOrgMembershipPara
 	return i, err
 }
 
+const getWorkoutAssignmentID = `-- name: GetWorkoutAssignmentID :one
+SELECT assignment_id FROM assigned_workout WHERE id = $1
+`
+
+func (q *Queries) GetWorkoutAssignmentID(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getWorkoutAssignmentID, id)
+	var assignment_id uuid.UUID
+	err := row.Scan(&assignment_id)
+	return assignment_id, err
+}
+
 const listAssignedExercises = `-- name: ListAssignedExercises :many
-SELECT id, assigned_workout_id, exercise_id, order_index, superset_group, target_sets, target_reps_min, target_reps_max, target_rpe, target_weight_kg, rest_seconds, tempo, note, progression_rule_id FROM assigned_exercise WHERE assigned_workout_id = $1 ORDER BY order_index
+SELECT id, assigned_workout_id, exercise_id, order_index, superset_group, target_sets, target_reps_min, target_reps_max, target_rpe, target_weight_kg, rest_seconds, tempo, note, progression_rule_id, override_source FROM assigned_exercise WHERE assigned_workout_id = $1 ORDER BY order_index
 `
 
 func (q *Queries) ListAssignedExercises(ctx context.Context, assignedWorkoutID uuid.UUID) ([]AssignedExercise, error) {
@@ -291,6 +345,7 @@ func (q *Queries) ListAssignedExercises(ctx context.Context, assignedWorkoutID u
 			&i.Tempo,
 			&i.Note,
 			&i.ProgressionRuleID,
+			&i.OverrideSource,
 		); err != nil {
 			return nil, err
 		}
@@ -335,4 +390,60 @@ func (q *Queries) ListAssignedWorkouts(ctx context.Context, assignmentID uuid.UU
 		return nil, err
 	}
 	return items, nil
+}
+
+const markAssignedWorkoutCompleted = `-- name: MarkAssignedWorkoutCompleted :exec
+UPDATE assigned_workout SET status = 'completed' WHERE id = $1
+`
+
+func (q *Queries) MarkAssignedWorkoutCompleted(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, markAssignedWorkoutCompleted, id)
+	return err
+}
+
+const updateAssignedExerciseTargets = `-- name: UpdateAssignedExerciseTargets :one
+UPDATE assigned_exercise SET
+  target_weight_kg = $2,
+  target_reps_min = $3,
+  target_reps_max = $4,
+  override_source = $5
+WHERE id = $1
+RETURNING id, assigned_workout_id, exercise_id, order_index, superset_group, target_sets, target_reps_min, target_reps_max, target_rpe, target_weight_kg, rest_seconds, tempo, note, progression_rule_id, override_source
+`
+
+type UpdateAssignedExerciseTargetsParams struct {
+	ID             uuid.UUID   `json:"id"`
+	TargetWeightKg *float64    `json:"target_weight_kg"`
+	TargetRepsMin  pgtype.Int2 `json:"target_reps_min"`
+	TargetRepsMax  pgtype.Int2 `json:"target_reps_max"`
+	OverrideSource pgtype.Text `json:"override_source"`
+}
+
+func (q *Queries) UpdateAssignedExerciseTargets(ctx context.Context, arg UpdateAssignedExerciseTargetsParams) (AssignedExercise, error) {
+	row := q.db.QueryRow(ctx, updateAssignedExerciseTargets,
+		arg.ID,
+		arg.TargetWeightKg,
+		arg.TargetRepsMin,
+		arg.TargetRepsMax,
+		arg.OverrideSource,
+	)
+	var i AssignedExercise
+	err := row.Scan(
+		&i.ID,
+		&i.AssignedWorkoutID,
+		&i.ExerciseID,
+		&i.OrderIndex,
+		&i.SupersetGroup,
+		&i.TargetSets,
+		&i.TargetRepsMin,
+		&i.TargetRepsMax,
+		&i.TargetRpe,
+		&i.TargetWeightKg,
+		&i.RestSeconds,
+		&i.Tempo,
+		&i.Note,
+		&i.ProgressionRuleID,
+		&i.OverrideSource,
+	)
+	return i, err
 }

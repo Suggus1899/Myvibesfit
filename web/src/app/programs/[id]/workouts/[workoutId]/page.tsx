@@ -11,6 +11,14 @@ import { apiFetch, getAccessToken } from "@/lib/api";
 
 type Exercise = { id: string; name: string; primary_muscle: string };
 
+type ProgressionRule = {
+  id: string;
+  name: string;
+  type: string;
+  params: Record<string, number>;
+  is_system: boolean;
+};
+
 type ProgramExercise = {
   id: string;
   exercise_id: string;
@@ -20,6 +28,7 @@ type ProgramExercise = {
   target_reps_max?: number;
   target_rpe?: number;
   rest_seconds: number;
+  progression_rule_id?: string;
 };
 
 export default function WorkoutEditorPage() {
@@ -29,9 +38,10 @@ export default function WorkoutEditorPage() {
   const [workoutName, setWorkoutName] = useState<string | null>(null);
   const [exercises, setExercises] = useState<ProgramExercise[] | null>(null);
   const [catalog, setCatalog] = useState<Exercise[]>([]);
+  const [rules, setRules] = useState<ProgressionRule[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const [form, setForm] = useState({ exerciseId: "", sets: 3, repsMin: 8, repsMax: 12, rpe: "", rest: 90 });
+  const [form, setForm] = useState({ exerciseId: "", sets: 3, repsMin: 8, repsMax: 12, rpe: "", rest: 90, ruleId: "" });
   const [saving, setSaving] = useState(false);
 
   function load() {
@@ -50,6 +60,10 @@ export default function WorkoutEditorPage() {
       .then((res) => res.json())
       .then(setCatalog)
       .catch(() => setCatalog([]));
+    apiFetch("/v1/progression-rules")
+      .then((res) => res.json())
+      .then(setRules)
+      .catch(() => setRules([]));
   }
 
   useEffect(() => {
@@ -81,6 +95,7 @@ export default function WorkoutEditorPage() {
           target_reps_max: form.repsMax || null,
           target_rpe: form.rpe ? Number(form.rpe) : null,
           rest_seconds: form.rest,
+          progression_rule_id: form.ruleId || null,
         }),
       });
       if (!res.ok) throw new Error("No se pudo agregar el ejercicio");
@@ -159,6 +174,20 @@ export default function WorkoutEditorPage() {
                 <Label htmlFor="rest">Descanso (s)</Label>
                 <Input id="rest" type="number" min={0} value={form.rest} onChange={(e) => setForm({ ...form, rest: Number(e.target.value) })} className="w-20" />
               </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="rule">Progresión</Label>
+                <select
+                  id="rule"
+                  value={form.ruleId}
+                  onChange={(e) => setForm({ ...form, ruleId: e.target.value })}
+                  className="h-8 w-52 rounded-lg border border-input bg-transparent px-2.5 text-sm"
+                >
+                  <option value="">Sin progresión automática</option>
+                  {rules.map((r) => (
+                    <option key={r.id} value={r.id}>{r.name}</option>
+                  ))}
+                </select>
+              </div>
               <Button type="submit" disabled={saving}>{saving ? "Agregando..." : "Agregar"}</Button>
             </form>
           </CardContent>
@@ -180,6 +209,9 @@ export default function WorkoutEditorPage() {
                       {ex.target_sets}×{ex.target_reps_min ?? "?"}
                       {ex.target_reps_max ? `-${ex.target_reps_max}` : ""}
                       {ex.target_rpe ? ` @RPE ${ex.target_rpe}` : ""} · {ex.rest_seconds}s desc.
+                      {ex.progression_rule_id
+                        ? ` · ${rules.find((r) => r.id === ex.progression_rule_id)?.name ?? "con progresión"}`
+                        : " · sin progresión"}
                     </span>
                   </div>
                   <button

@@ -8,15 +8,21 @@ import (
 	"github.com/google/uuid"
 
 	"myvibesfit/api/internal/domain"
+	"myvibesfit/api/internal/progression"
 )
 
 type SyncService struct {
 	uow domain.UnitOfWork
 	gam *domain.GamificationService
+
+	// Lecturas del plan y del catalogo de reglas, de solo lectura y previas a
+	// la transaccion (mismo patron que AssignmentService.Assign).
+	assignments domain.AssignmentRepository
+	programs    domain.ProgramRepository
 }
 
-func NewSyncService(uow domain.UnitOfWork, gam *domain.GamificationService) *SyncService {
-	return &SyncService{uow: uow, gam: gam}
+func NewSyncService(uow domain.UnitOfWork, gam *domain.GamificationService, assignments domain.AssignmentRepository, programs domain.ProgramRepository) *SyncService {
+	return &SyncService{uow: uow, gam: gam, assignments: assignments, programs: programs}
 }
 
 type SyncSetInput struct {
@@ -73,9 +79,16 @@ func (s *SyncService) SyncSessions(ctx context.Context, userID uuid.UUID, orgID 
 		return SyncResult{}, domain.ErrInvalidInput
 	}
 
+	// El plan y las reglas de progresion son datos de solo lectura: se leen
+	// antes de abrir la transaccion, igual que la plantilla en Assign.
+	plans, err := s.loadPlanContext(ctx, sessions)
+	if err != nil {
+		return SyncResult{}, err
+	}
+
 	result := SyncResult{}
 
-	err := s.uow.Execute(ctx, func(repos domain.TxRepos) error {
+	err = s.uow.Execute(ctx, func(repos domain.TxRepos) error {
 		var completedCount int32
 		var completedVolume float64
 		var lastActiveDate time.Time
@@ -138,6 +151,9 @@ func (s *SyncService) SyncSessions(ctx context.Context, userID uuid.UUID, orgID 
 				if sess.StartedAt.After(lastActiveDate) {
 					lastActiveDate = sess.StartedAt
 				}
+				if err := s.progressPlan(ctx, repos, sess, plans); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -199,6 +215,180 @@ func (s *SyncService) SyncSessions(ctx context.Context, userID uuid.UUID, orgID 
 		return SyncResult{}, err
 	}
 	return result, nil
+}
+
+// planContext es lo que hace falta saber del plan para progresar un dia
+// entrenado, leido antes de la transaccion.
+type planContext struct {
+	assignmentID uuid.UUID
+	// exercises indexa los ejercicios de ese dia por exercise_id, para poder
+	// cruzar lo que el movil reporto (que solo trae exercise_id) con el
+	// ejercicio asignado que lo origino.
+	exercises map[uuid.UUID]domain.AssignedExercise
+	rules     map[uuid.UUID]domain.ProgressionRule
+}
+
+func (s *SyncService) loadPlanContext(ctx context.Context, sessions []SyncSessionInput) (map[uuid.UUID]planContext, error) {
+	out := map[uuid.UUID]planContext{}
+
+	for _, sess := range sessions {
+		if sess.AssignedWorkoutID == nil || sess.Status != string(domain.SessionStatusCompleted) {
+			continue
+		}
+		if _, done := out[*sess.AssignedWorkoutID]; done {
+			continue
+		}
+
+		assignmentID, err := s.assignments.GetWorkoutAssignmentID(ctx, *sess.AssignedWorkoutID)
+		if err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				continue // entrenamiento libre o plan ya cancelado: nada que progresar
+			}
+			return nil, err
+		}
+
+		exercises, err := s.assignments.ListExercises(ctx, *sess.AssignedWorkoutID)
+		if err != nil {
+			return nil, err
+		}
+
+		pc := planContext{
+			assignmentID: assignmentID,
+			exercises:    make(map[uuid.UUID]domain.AssignedExercise, len(exercises)),
+			rules:        map[uuid.UUID]domain.ProgressionRule{},
+		}
+		for _, ex := range exercises {
+			pc.exercises[ex.ExerciseID] = ex
+			if ex.ProgressionRuleID == nil {
+				continue
+			}
+			if _, cached := pc.rules[*ex.ProgressionRuleID]; cached {
+				continue
+			}
+			rule, err := s.programs.GetProgressionRuleByID(ctx, *ex.ProgressionRuleID)
+			if err != nil {
+				if errors.Is(err, domain.ErrNotFound) {
+					continue // regla borrada: el ejercicio simplemente no progresa
+				}
+				return nil, err
+			}
+			pc.rules[*ex.ProgressionRuleID] = rule
+		}
+		out[*sess.AssignedWorkoutID] = pc
+	}
+	return out, nil
+}
+
+// progressPlan cierra el dia entrenado y escribe el objetivo de la proxima
+// ocurrencia de cada ejercicio que tenga regla de progresion.
+func (s *SyncService) progressPlan(ctx context.Context, repos domain.TxRepos, sess SyncSessionInput, plans map[uuid.UUID]planContext) error {
+	if sess.AssignedWorkoutID == nil {
+		return nil // entrenamiento libre
+	}
+	pc, ok := plans[*sess.AssignedWorkoutID]
+	if !ok {
+		return nil
+	}
+
+	if err := repos.Assignments.MarkWorkoutCompleted(ctx, *sess.AssignedWorkoutID); err != nil {
+		return err
+	}
+
+	for _, ex := range sess.Exercises {
+		assigned, ok := pc.exercises[ex.ExerciseID]
+		if !ok || assigned.ProgressionRuleID == nil {
+			continue // ejercicio agregado a mano, o sin regla: no progresa
+		}
+		rule, ok := pc.rules[*assigned.ProgressionRuleID]
+		if !ok {
+			continue
+		}
+
+		next, found, err := repos.Assignments.FindNextExerciseOccurrence(ctx, pc.assignmentID, ex.ExerciseID, *sess.AssignedWorkoutID)
+		if err != nil {
+			return err
+		}
+		if !found {
+			continue // ultima vez que aparece en el plan
+		}
+
+		// Una sugerencia de IA aprobada gana esta vez. Se consume el flag para
+		// que a partir de la proxima sesion vuelva el calculo automatico.
+		if next.OverrideSource != nil {
+			if _, err := repos.Assignments.UpdateExerciseTargets(ctx, next.ID, next.TargetWeightKg, next.TargetRepsMin, next.TargetRepsMax, nil); err != nil {
+				return err
+			}
+			continue
+		}
+
+		out, err := progression.Apply(progression.Type(rule.Type), rule.Params, progressionInput(assigned, ex))
+		if err != nil {
+			// Una regla con type invalido es dato malo, no una falla del sync:
+			// el resto de la sesion ya se guardo bien.
+			continue
+		}
+
+		weight := out.NextWeightKg
+		repsMin, repsMax := out.NextRepsMin, out.NextRepsMax
+		if _, err := repos.Assignments.UpdateExerciseTargets(ctx, next.ID, &weight, &repsMin, &repsMax, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// progressionInput traduce lo que el cliente reporto a la entrada del motor.
+// Success = todas las series de trabajo alcanzaron el piso del rango.
+func progressionInput(assigned domain.AssignedExercise, ex SyncExerciseInput) progression.Input {
+	in := progression.Input{
+		TargetRepsMin: derefInt(assigned.TargetRepsMin),
+		TargetRepsMax: derefInt(assigned.TargetRepsMax),
+	}
+	if assigned.TargetWeightKg != nil {
+		in.LastWeightKg = *assigned.TargetWeightKg
+	}
+	if assigned.TargetRPE != nil {
+		in.TargetRPE = *assigned.TargetRPE
+	}
+
+	var rpeSum float64
+	var rpeCount int
+	for _, set := range ex.Sets {
+		if (set.Type != "working" && set.Type != "") || !set.IsCompleted {
+			continue
+		}
+		if set.Reps != nil {
+			in.RepsAchieved = append(in.RepsAchieved, *set.Reps)
+		}
+		// El peso real levantado manda sobre el prescrito: si el cliente
+		// cambio la carga, la progresion parte de lo que efectivamente hizo.
+		if set.WeightKg != nil {
+			in.LastWeightKg = *set.WeightKg
+		}
+		if set.RPE != nil {
+			rpeSum += *set.RPE
+			rpeCount++
+		}
+	}
+	if rpeCount > 0 {
+		in.ActualRPE = rpeSum / float64(rpeCount)
+	}
+
+	in.Success = len(in.RepsAchieved) > 0
+	for _, reps := range in.RepsAchieved {
+		if reps < in.TargetRepsMin {
+			in.Success = false
+			break
+		}
+	}
+	return in
+}
+
+func derefInt(v *int) int {
+	if v == nil {
+		return 0
+	}
+	return *v
 }
 
 func (s *SyncService) checkPersonalRecords(ctx context.Context, repos domain.TxRepos, userID, exerciseID uuid.UUID, setLogID int64, weightKg float64, reps int, performedAt time.Time) (bool, error) {

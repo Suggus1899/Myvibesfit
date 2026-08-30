@@ -1092,6 +1092,7 @@ type AssignedExercise struct {
 	Tempo             pgtype.Text `json:"tempo"`
 	Note              pgtype.Text `json:"note"`
 	ProgressionRuleID pgtype.UUID `json:"progression_rule_id"`
+	OverrideSource    pgtype.Text `json:"override_source"`
 }
 
 type AssignedWorkout struct {

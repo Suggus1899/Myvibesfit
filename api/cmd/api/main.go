@@ -68,7 +68,7 @@ func main() {
 	programSvc := service.NewProgramService(programRepo, auditLogger)
 	assignmentSvc := service.NewAssignmentService(assignmentRepo, programRepo, uow, auditLogger)
 	gamificationSvc := domain.NewGamificationService()
-	syncSvc := service.NewSyncService(uow, gamificationSvc)
+	syncSvc := service.NewSyncService(uow, gamificationSvc, assignmentRepo, programRepo)
 	progressSvc := service.NewProgressService(progressRepo)
 	habitSvc := service.NewHabitService(habitRepo, uow, gamificationSvc)
 	coachSvc := service.NewCoachService(coachRepo)

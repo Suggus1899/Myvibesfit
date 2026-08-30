@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"myvibesfit/api/internal/domain"
 	"myvibesfit/api/internal/repository/db"
@@ -126,6 +127,54 @@ func (r *AssignmentRepository) GetOrgMembership(ctx context.Context, orgID, user
 	return toDomainMembership(row), nil
 }
 
+func (r *AssignmentRepository) GetWorkoutAssignmentID(ctx context.Context, assignedWorkoutID uuid.UUID) (uuid.UUID, error) {
+	id, err := r.q.GetWorkoutAssignmentID(ctx, assignedWorkoutID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return uuid.Nil, domain.ErrNotFound
+		}
+		return uuid.Nil, err
+	}
+	return id, nil
+}
+
+func (r *AssignmentRepository) MarkWorkoutCompleted(ctx context.Context, assignedWorkoutID uuid.UUID) error {
+	return r.q.MarkAssignedWorkoutCompleted(ctx, assignedWorkoutID)
+}
+
+func (r *AssignmentRepository) FindNextExerciseOccurrence(ctx context.Context, assignmentID, exerciseID, excludeWorkoutID uuid.UUID) (domain.AssignedExercise, bool, error) {
+	row, err := r.q.FindNextAssignedExercise(ctx, db.FindNextAssignedExerciseParams{
+		AssignmentID: assignmentID, ExerciseID: exerciseID, AssignedWorkoutID: excludeWorkoutID,
+	})
+	if err != nil {
+		// Sin proxima ocurrencia no es un error de infraestructura: el plan
+		// puede haber terminado. El caller decide que hacer.
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.AssignedExercise{}, false, nil
+		}
+		return domain.AssignedExercise{}, false, err
+	}
+	return toDomainAssignedExercise(row), true, nil
+}
+
+func (r *AssignmentRepository) UpdateExerciseTargets(ctx context.Context, id uuid.UUID, weightKg *float64, repsMin, repsMax *int, overrideSource *string) (domain.AssignedExercise, error) {
+	var source pgtype.Text
+	if overrideSource != nil {
+		source = pgtype.Text{String: *overrideSource, Valid: true}
+	}
+	row, err := r.q.UpdateAssignedExerciseTargets(ctx, db.UpdateAssignedExerciseTargetsParams{
+		ID: id, TargetWeightKg: weightKg, TargetRepsMin: intPtrToPgInt2(repsMin),
+		TargetRepsMax: intPtrToPgInt2(repsMax), OverrideSource: source,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.AssignedExercise{}, domain.ErrNotFound
+		}
+		return domain.AssignedExercise{}, err
+	}
+	return toDomainAssignedExercise(row), nil
+}
+
 func toDomainAssignment(a db.Assignment) domain.Assignment {
 	return domain.Assignment{
 		ID: a.ID, OrgID: a.OrgID, ProgramID: pgUUIDToPtr(a.ProgramID), ClientUserID: a.ClientUserID,
@@ -148,6 +197,6 @@ func toDomainAssignedExercise(e db.AssignedExercise) domain.AssignedExercise {
 		SupersetGroup: pgInt2ToPtr(e.SupersetGroup), TargetSets: e.TargetSets, TargetRepsMin: pgInt2ToPtr(e.TargetRepsMin),
 		TargetRepsMax: pgInt2ToPtr(e.TargetRepsMax), TargetRPE: e.TargetRpe, TargetWeightKg: e.TargetWeightKg,
 		RestSeconds: e.RestSeconds, Tempo: pgTextToString(e.Tempo), Note: pgTextToString(e.Note),
-		ProgressionRuleID: pgUUIDToPtr(e.ProgressionRuleID),
+		ProgressionRuleID: pgUUIDToPtr(e.ProgressionRuleID), OverrideSource: pgTextToPtr(e.OverrideSource),
 	}
 }

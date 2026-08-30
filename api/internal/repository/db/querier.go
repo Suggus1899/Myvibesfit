@@ -36,6 +36,9 @@ type Querier interface {
 	DeactivateExercise(ctx context.Context, arg DeactivateExerciseParams) (int64, error)
 	DeleteProgramExercise(ctx context.Context, id uuid.UUID) error
 	DeleteProgramWorkout(ctx context.Context, id uuid.UUID) error
+	// La proxima vez que este ejercicio aparece en el plan, saltando el dia que
+	// se acaba de entrenar (excluded_workout_id) y los ya completados.
+	FindNextAssignedExercise(ctx context.Context, arg FindNextAssignedExerciseParams) (AssignedExercise, error)
 	GetAISuggestionByID(ctx context.Context, arg GetAISuggestionByIDParams) (AiSuggestion, error)
 	GetActiveAssignmentByClient(ctx context.Context, clientUserID uuid.UUID) (Assignment, error)
 	GetActiveClientHabit(ctx context.Context, arg GetActiveClientHabitParams) (ClientHabit, error)
@@ -59,6 +62,7 @@ type Querier interface {
 	GetUserByID(ctx context.Context, id uuid.UUID) (AppUser, error)
 	GetUserStats(ctx context.Context, userID uuid.UUID) (UserStat, error)
 	GetUserStreak(ctx context.Context, arg GetUserStreakParams) (UserStreak, error)
+	GetWorkoutAssignmentID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error
 	LinkCoachClient(ctx context.Context, arg LinkCoachClientParams) error
 	ListAchievements(ctx context.Context) ([]Achievement, error)
@@ -83,12 +87,14 @@ type Querier interface {
 	ListSetLogsForExercise(ctx context.Context, arg ListSetLogsForExerciseParams) ([]SetLog, error)
 	ListUserAchievements(ctx context.Context, userID uuid.UUID) ([]ListUserAchievementsRow, error)
 	ListUserStreaks(ctx context.Context, userID uuid.UUID) ([]UserStreak, error)
+	MarkAssignedWorkoutCompleted(ctx context.Context, id uuid.UUID) error
 	ReviewAISuggestion(ctx context.Context, arg ReviewAISuggestionParams) (AiSuggestion, error)
 	RevokeRefreshTokenByHash(ctx context.Context, tokenHash string) error
 	SetProgramStatus(ctx context.Context, arg SetProgramStatusParams) (Program, error)
 	SubscribeHabit(ctx context.Context, arg SubscribeHabitParams) (ClientHabit, error)
 	TouchUserLogin(ctx context.Context, id uuid.UUID) error
 	UnsubscribeHabit(ctx context.Context, arg UnsubscribeHabitParams) error
+	UpdateAssignedExerciseTargets(ctx context.Context, arg UpdateAssignedExerciseTargetsParams) (AssignedExercise, error)
 	UpdateExercise(ctx context.Context, arg UpdateExerciseParams) (Exercise, error)
 	UpdateMemberRole(ctx context.Context, arg UpdateMemberRoleParams) (Membership, error)
 	UpdateProgram(ctx context.Context, arg UpdateProgramParams) (Program, error)

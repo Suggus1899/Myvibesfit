@@ -23,6 +23,17 @@ func stringToPgText(s string) pgtype.Text {
 	return pgtype.Text{String: s, Valid: true}
 }
 
+// pgTextToPtr conserva la diferencia entre NULL y cadena vacia, a diferencia
+// de pgTextToString. Para columnas donde "no hay valor" es semanticamente
+// distinto de "" — override_source, por ejemplo.
+func pgTextToPtr(t pgtype.Text) *string {
+	if !t.Valid {
+		return nil
+	}
+	s := t.String
+	return &s
+}
+
 func pgUUIDToPtr(u pgtype.UUID) *uuid.UUID {
 	if !u.Valid {
 		return nil
