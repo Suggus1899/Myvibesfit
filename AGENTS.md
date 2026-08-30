@@ -14,8 +14,43 @@ supervisadas por el coach.
 
 ## Estado actual
 
-Fases 0-10 de [PHASES.md](./docs/PHASES.md) — fase 10 completa en su
-subconjunto realizable sin VPS (ver más abajo).
+Fases 0-10 de [PHASES.md](./docs/PHASES.md) construidas, **más el cierre de
+la cadena de producto** (ver abajo). Lo que falta para producción real
+requiere un VPS.
+
+### La cadena de producto ya está cerrada
+
+Hasta hace poco el backend estaba muy por delante de sus dos UIs: **27 de 47
+endpoints no tenían ningún consumidor** y el producto no se podía usar de
+punta a punta sin SQL manual (nadie podía ser coach, no había UI de
+programas, y `coach_client` no tenía ni un INSERT en todo el repo, así que el
+dashboard del coach siempre estaba vacío). Eso ya no es así:
+
+- `POST /v1/orgs` — crear gimnasio desde la UI; el creador queda `owner` y se
+  le reemite el JWT con `org_id`+`role` (mismo patrón que `JoinOrganization`).
+- `GET /v1/org`, `GET /v1/org/members`, `PATCH /v1/org/members/{id}/role` —
+  gestión de miembros; solo `owner` cambia roles, y el endpoint **no** permite
+  otorgar `owner`. Respeta el índice `membership_one_active_role_per_org_uq`
+  de la migración `0004` (es un UPDATE del rol, nunca una segunda fila activa).
+- **El vínculo coach↔cliente se crea solo**: `AssignmentService.Assign` llama
+  a `repos.Coaches.LinkClient` dentro del mismo `uow.Execute` que crea la
+  asignación. Por eso `TxRepos` ahora tiene un 5º campo (`Coaches`).
+- **Constructor de programas completo en el panel** (`/programs`,
+  `/programs/{id}`, `/programs/{id}/workouts/{workoutId}`): crear, editar,
+  grilla semana×día, ejercicios con series/reps/RPE/descanso, publicar,
+  archivar y asignar. Consume los 20 endpoints de programas que antes nadie
+  tocaba.
+- `GET|PUT /v1/me/profile` — onboarding del cliente (`client_profile`, que
+  tenía cero queries): objetivo, experiencia, días/minutos, equipamiento,
+  limitaciones y sistema de unidades. **Alimenta el resumen que se le manda a
+  Claude** (`AssignmentSummary` ahora incluye ese contexto).
+- `GET /v1/habits/logs?date=` — los hábitos ya marcados en una fecha; sin
+  esto la app no podía saber cuáles estaban cumplidos y duplicaba logs.
+
+Verificado end-to-end **desde el navegador real** (no solo curl): registrar →
+crear gimnasio → crear/publicar programa → cliente se une con el código →
+asignar → el cliente aparece en el dashboard, y `GET /v1/me/assignment/current`
+devuelve el plan (antes daba 404 siempre).
 
 **Backend (`api/`)** — verificado end-to-end contra Postgres real (migraciones +
 seed + servidor + curl):
@@ -86,10 +121,14 @@ Tailwind v4 + shadcn/ui, `pnpm lint` y `pnpm build` limpios:
 **Fase 9 (IA supervisada) — completa con una salvedad importante:**
 - `cmd/worker`: por cada asignación activa arma un `AssignmentSummary`
   (sesiones completadas, streak, adherencia a hábitos, PRs recientes,
-  tendencia de peso/RPE por ejercicio — `internal/ai/suggester.go` +
-  queries en `db/queries/ai_suggestion.sql`) y le pide a Claude Opus 5 una
+  tendencia de peso/RPE por ejercicio, más el perfil del cliente —
+  `internal/adapter/anthropic/suggester.go` + queries en
+  `db/queries/ai_suggestion.sql`) y le pide a Claude una
   sugerencia vía tool use forzado (`propose_suggestion`), validada en Go
-  contra el enum de `suggestion_kind` antes de guardarse como `pending`.
+  antes de guardarse como `pending`: enum de `suggestion_kind`, rango de
+  `confidence`, y **los topes de magnitud que `docs/ARCHITECTURE.md` §4
+  documentaba sin implementar** (>10% de salto de carga, >30% de volumen →
+  se descarta; tests en `domain/ai_suggestion_test.go`).
   Nunca se auto-aplica — solo el coach puede aprobar/rechazar desde
   `/v1/ai-suggestions/{id}/approve|reject`.
 - **Verificado el pipeline completo excepto la llamada real a Claude**: corrí
@@ -123,9 +162,51 @@ Tailwind v4 + shadcn/ui, `pnpm lint` y `pnpm build` limpios:
   prueba de carga de 100 usuarios concurrentes, políticas de privacidad de
   fotos de progreso (es texto/producto, no código).
 
-**Siguiente paso:** conseguir un VPS real para cerrar el resto de fase 10.
+## Tests
+
+- **Go**: `internal/progression` (4 estrategias, table-driven),
+  `internal/platform` (jwt/hash), `internal/service` (`aggregateTrends`), y
+  `internal/domain` — `GamificationService` con un fake del port
+  (acumulación de XP y nivel, los 4 casos de borde de `BumpStreak`, y que
+  `CheckAchievements` no redesbloquea), `Suggestion.Validate` (incluidos los
+  topes de magnitud) y `NeedsAttention`.
+- **Sin cubrir todavía**: `AssignmentService.Assign` y
+  `SyncService.SyncSessions` (los dos flujos transaccionales — necesitan un
+  `UnitOfWork` falso), y los handlers/middleware HTTP.
+- **Flutter**: solo `AppColors`. Faltan router/redirects, `AuthController`,
+  cola de sync y `WorkoutStore`.
+
+## Deuda conocida (diagnosticada, no arreglada)
+
+Auditorías previas (go-reviewer, architect, database-reviewer) dejaron esto
+documentado — no hace falta volver a auditar, están confirmados:
+
+- **Gamificación no idempotente**: `UpsertWorkoutSession`/`UpsertHabitLog` son
+  idempotentes por `client_local_id`, pero el XP/racha/logros se recalculan en
+  cada reenvío. Un retry de red duplica recompensas (no filas).
+- **Lost update en stats/rachas**: `ApplyStatsDelta`/`BumpStreak` hacen
+  read-modify-write sin `FOR UPDATE` bajo READ COMMITTED.
+- **N+1 en `checkPersonalRecords`**: 4 round-trips por set de tipo `working`.
+- **`TxRepos` en su límite de diseño**: ya son 5 campos y 4 flujos; ningún
+  flujo usa todos. Al quinto flujo o al primero que necesite otro nivel de
+  aislamiento, conviene repartirlo.
+- **`AISuggestionRepository` mezcla 4 agregados ajenos** (counts de
+  assignment/session/habit) porque el port se derivó del archivo sqlc, no de
+  los casos de uso.
+- **Ports con métodos muertos**: `AssignmentRepository.GetByID`,
+  `SessionRepository.CountCompletedSessionsOnDate`,
+  `HabitRepository.GetHabitByID`, `ProgramRepository.GetProgressionRuleByID`,
+  `AISuggestionRepository.GetByID`.
+- **`internal/progression/` no tiene importadores**: el motor de progresión
+  está construido y testeado pero todavía no se llama desde ningún flujo.
+- **Tablas modeladas sin uso**: `progress_photo`, `exercise_alternative`,
+  `device_token` (push), `user_identity` (OAuth).
+
+**Siguiente paso:** conseguir un VPS real para cerrar el resto de fase 10
+(push, backups, monitoreo, prueba de carga, cron del worker).
 La UI de Flutter sigue pendiente de que el usuario la confirme visualmente
-(`flutter run -d chrome` o `http://localhost:5555`). Falta
+(`flutter run -d chrome` o `http://localhost:5555`) — el panel del navegador
+de este entorno no compone el canvas de Flutter web. Falta
 `ANTHROPIC_API_KEY` (o `ant auth login`) para ver una sugerencia de IA real
 generada por Claude en `cmd/worker` (fase 9).
 
@@ -204,16 +285,31 @@ silenciados.
 
 ## Comandos
 
+Con Postgres local nativo (lo habitual en esta máquina) hay tres scripts en
+la raíz que ya traen las variables de entorno puestas: `run-api.cmd` (:8080),
+`run-coach-web.cmd` (:3000) y `run-flutter-web.cmd` (:5555). También están
+como entradas en `.claude/launch.json`.
+
+A mano, o con Docker:
+
 ```bash
-docker compose up -d db
+docker compose up -d db          # solo si se usa el Postgres del compose (:5433)
 cd api && goose -dir db/migrations postgres "$DATABASE_URL" up
-sqlc generate
+sqlc generate                    # después de tocar db/queries/*.sql
 go run ./cmd/api
-cd ../web && pnpm dev  # panel del coach en :3000
+cd ../web && pnpm dev            # panel del coach + landing en :3000
+```
+
+El worker de IA es una **pasada única**, pensado para cron (no tiene
+scheduler embebido). Necesita `ANTHROPIC_API_KEY`:
+
+```bash
+cd api && go run ./cmd/worker    # una corrida; en el VPS va en crontab nocturno
 ```
 
 Verificación antes de commit: `go vet ./... && go test ./... && go build ./...`
-(API) · `pnpm lint && pnpm build` (panel) · `dart analyze && flutter test` (app).
+y `gofmt -l .` (API) · `pnpm lint && pnpm build` (panel) ·
+`flutter analyze && flutter test` (app).
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence

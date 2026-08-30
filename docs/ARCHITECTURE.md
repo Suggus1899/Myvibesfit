@@ -15,7 +15,7 @@ progresión de cargas y una capa de IA propone ajustes que el coach aprueba.
 | App cliente | Flutter + Riverpod + go_router + Drift + dio | Único frontend móvil; Drift da el cache offline |
 | Offline | Híbrido: lectura cacheada + cola de mutaciones | En un gimnasio sin cobertura hay que poder registrar series |
 | Progresión | Determinista (doble progresión / RPE) | Es una fórmula. Un LLM decidiendo cargas sin historial es un riesgo de lesión |
-| IA | Claude API (`claude-sonnet-5`), propone → coach aprueba | Trazabilidad y responsabilidad clínica |
+| IA | Claude API, propone → coach aprueba. Modelo por `ANTHROPIC_SUGGESTION_MODEL` (default `claude-opus-5`) | Trazabilidad y responsabilidad clínica |
 | Repos | Monorepo + Docker Compose en VPS | Un solo sitio, control de costes |
 | v1 | Entrenamiento + hábitos | Nutrición queda para v2, el esquema ya la contempla |
 
@@ -34,30 +34,44 @@ myvibesfit/
 │   ├── cmd/worker/main.go        Jobs: rachas, sugerencias IA, push
 │   ├── internal/
 │   │   ├── config/               Todo por variable de entorno, cero hardcode
-│   │   ├── domain/               Entidades, errores tipados, value objects
+│   │   ├── domain/               Entidades, los 12 ports, UnitOfWork,
+│   │   │                         GamificationService. Sin imports de pgx/sqlc
+│   │   ├── service/              Casos de uso: dependen solo de ports
+│   │   ├── adapter/
+│   │   │   ├── postgres/         Implementa los ports sobre sqlc; único
+│   │   │   │                     lugar con pgtype. Traduce pgx.ErrNoRows
+│   │   │   └── anthropic/        Implementa domain.SuggestionProposer
 │   │   ├── transport/http/
 │   │   │   ├── router.go         chi, montaje de rutas
-│   │   │   ├── middleware/       auth, tenant, ratelimit, requestid, recover
+│   │   │   ├── middleware/       auth.go (JWT) y rbac.go (RequireRole,
+│   │   │   │                     RequireOrg). Rate limit, request-id y
+│   │   │   │                     recover son los de chi, montados en router.go
 │   │   │   ├── dto/              Request/Response explícitos, nunca entidades
 │   │   │   └── handler/          Un fichero por módulo
-│   │   ├── service/               Lógica de negocio y transacciones
-│   │   ├── repository/            Interfaces + implementación sobre sqlc
-│   │   ├── progression/           Motor determinista (sin dependencias externas)
-│   │   ├── ai/                    Cliente Claude, prompts, validación de salida
-│   │   └── platform/              jwt, hash, storage S3, push, logger, clock
+│   │   ├── repository/db/        Generado por sqlc — NO editar a mano
+│   │   ├── progression/          Motor determinista (sin dependencias
+│   │   │                         externas). Testeado, todavía sin llamadores
+│   │   └── platform/             jwt, hash, refreshtoken
 │   ├── db/
-│   │   ├── migrations/            goose: 0001_init, 0002_training, 0003_execution
-│   │   ├── queries/                .sql fuente de sqlc
-│   │   └── seed/                   Catálogo de ejercicios, hábitos, logros
-│   ├── sqlc.yaml
-│   └── openapi.yaml               Contrato: genera el cliente Dart y los tipos TS
-├── web/                           Panel del coach (Next.js)
+│   │   ├── migrations/           goose: 0001_init, 0002_training,
+│   │   │                         0003_execution, 0004_data_integrity
+│   │   ├── queries/               .sql fuente de sqlc
+│   │   └── seed/                  Catálogo de ejercicios, hábitos, logros
+│   └── sqlc.yaml
+├── web/                           Panel del coach + landing pública (Next.js)
 ├── app/                           Cliente Flutter
 ├── docs/
 │   ├── ARCHITECTURE.md
-│   └── DESIGN.md
+│   ├── DESIGN.md
+│   └── PHASES.md
 ├── docker-compose.yml
 └── AGENTS.md
+
+> **No existe `openapi.yaml`.** Este documento lo describía como el contrato
+> que genera el cliente Dart y los tipos TS; nunca se construyó. Hoy los DTOs
+> se escriben a mano en los tres lados (`transport/http/dto/`,
+> `app/lib/core/network/models.dart`, tipos inline en `web/src/`). Si se
+> retoma, es una decisión abierta, no algo que falte terminar.
 ```
 
 ### Flujo de una petición
@@ -104,20 +118,27 @@ lo lee.
 
 ## 4. Capa de IA
 
-Un job nocturno recorre las asignaciones activas y, para las que tienen suficiente
-historial (mínimo 3 sesiones del bloque), llama a Claude con un resumen estructurado:
-adherencia, RPE medio por patrón de movimiento, sesiones saltadas, tendencia de volumen
-y racha de hábitos.
+Un job nocturno (`cmd/worker`, una sola pasada — el scheduler es cron, no está
+embebido) recorre las asignaciones activas y llama a Claude con un resumen
+estructurado: adherencia, tendencia de peso/RPE por ejercicio, PRs recientes,
+racha, hábitos, y el perfil del cliente (objetivo, experiencia, equipamiento
+disponible, limitaciones).
 
 La respuesta se valida contra un esquema estricto antes de tocar la BD. Se guarda en
 `ai_suggestion` con `input_snapshot` — los datos exactos que la generaron — y llega al
 coach como tarjeta aprobable en su panel. **Nada se aplica solo.**
 
-Reglas duras:
+Reglas duras (implementadas en `domain.Suggestion.Validate`, con tests en
+`domain/ai_suggestion_test.go`):
 - La IA no escribe en `assigned_exercise`; escribe una propuesta.
 - Sugerencias fuera de rango razonable (>10 % de salto de carga, >30 % de volumen) se
   descartan en el servidor antes de mostrarse.
 - El cliente nunca ve una sugerencia sin aprobar.
+
+**Sin umbral mínimo de historial.** Versiones anteriores de este documento
+decían "mínimo 3 sesiones del bloque"; ese filtro no existe en el código — el
+worker procesa toda asignación activa que tenga coach. Si se quiere, va en
+`SuggestionWorkerService.ProcessAssignment`.
 
 ## 5. Sincronización offline
 
@@ -133,44 +154,89 @@ por lotes que devuelve el resultado por elemento.
 No se resuelven conflictos de escritura concurrente: un cliente entrena desde un
 dispositivo a la vez. **Lo que el móvil escribió gana.**
 
-## 6. Endpoints principales
+## 6. Endpoints
+
+Esta lista refleja `internal/transport/http/router.go`, que es la fuente de
+verdad. Todo bajo `/v1`.
 
 ```
-POST   /v1/auth/register
-POST   /v1/auth/login
-POST   /v1/auth/refresh
-POST   /v1/orgs/join                    Vincular con código de gimnasio
+# Público
+GET    /health
+POST   /v1/auth/register                rate limit 10/min por IP
+POST   /v1/auth/login                   idem
+POST   /v1/auth/refresh                 idem, rota el refresh token
 
-GET    /v1/me
-PUT    /v1/me/profile
-GET    /v1/me/assignment/current        Entrenamiento activo + semana en curso
-GET    /v1/me/home                      Anillo del día, racha, próximo entreno, hábitos
-
-GET    /v1/exercises                    Globales + los del gimnasio del usuario
+# Catálogo (auth opcional: sin token devuelve solo los globales)
+GET    /v1/exercises
 GET    /v1/exercises/{id}
 
-POST   /v1/sync/sessions                Lote idempotente de sesiones y series
-POST   /v1/sync/habits                  Lote idempotente de registros de hábito
+# Cliente autenticado
+GET    /v1/me
+GET    /v1/me/profile                   Onboarding: objetivo, equipamiento, unidades
+PUT    /v1/me/profile
+POST   /v1/orgs                         Crear gimnasio (el creador queda owner)
+POST   /v1/orgs/join                    Vincular con código de gimnasio
+GET    /v1/me/assignment/current        Mesociclo completo del cliente
+GET    /v1/me/stats                     XP, nivel, rachas
+GET    /v1/me/achievements
+
+POST   /v1/sync/sessions                Lote idempotente por client_local_id
 
 GET    /v1/progress/exercises/{id}      Serie temporal para la gráfica
 GET    /v1/progress/records
-GET    /v1/progress/volume              Volumen semanal por grupo muscular
+GET    /v1/progress/volume
+POST   /v1/body-metrics
+GET    /v1/body-metrics
 
-# Coach (panel web)
-GET    /v1/coach/clients
-GET    /v1/coach/clients/{id}/overview  Adherencia, PRs, alertas
-POST   /v1/coach/programs
-POST   /v1/coach/programs/{id}/assign
-PATCH  /v1/coach/assigned-exercises/{id}
-GET    /v1/coach/suggestions?status=pending
-POST   /v1/coach/suggestions/{id}/approve
-POST   /v1/coach/suggestions/{id}/reject
+GET    /v1/habits
+GET    /v1/habits/logs?date=            Qué hábitos ya se marcaron ese día
+GET    /v1/me/habits
+POST   /v1/habits/subscribe
+DELETE /v1/habits/{id}
+POST   /v1/habits/{id}/log
 
-# Admin del gimnasio
+# Gimnasio (requiere rol owner/admin/coach + org en el JWT)
+GET    /v1/org
 GET    /v1/org/members
-POST   /v1/org/invitations
-PATCH  /v1/org/branding
+PATCH  /v1/org/members/{id}/role        Solo owner; no puede otorgar owner
+
+POST   /v1/exercises                    Crear en el catálogo del gimnasio
+PATCH  /v1/exercises/{id}               Scoped a la org: no toca los globales
+DELETE /v1/exercises/{id}               idem (soft-delete vía is_active)
+
+GET    /v1/progression-rules
+POST   /v1/progression-rules
+
+POST   /v1/programs
+GET    /v1/programs
+GET    /v1/programs/{id}
+PATCH  /v1/programs/{id}
+POST   /v1/programs/{id}/publish
+POST   /v1/programs/{id}/archive
+POST   /v1/programs/{id}/assign         Copia la plantilla + vincula coach↔cliente
+POST   /v1/programs/{id}/workouts
+GET    /v1/programs/{id}/workouts
+PATCH  /v1/workouts/{id}
+DELETE /v1/workouts/{id}
+POST   /v1/workouts/{id}/exercises
+GET    /v1/workouts/{id}/exercises
+PATCH  /v1/program-exercises/{id}
+DELETE /v1/program-exercises/{id}
+POST   /v1/assignments/{id}/cancel
+
+GET    /v1/coach/clients                Overview con needs_attention
+GET    /v1/coach/suggestions            Pendientes de revisar
+POST   /v1/ai-suggestions/{id}/approve
+POST   /v1/ai-suggestions/{id}/reject
 ```
+
+**Planeados y nunca construidos** (estaban en versiones anteriores de este
+documento como si existieran): `GET /v1/me/home` (la app compone el home con
+`/me/stats` + `/me/assignment/current`), `POST /v1/sync/habits` (el registro
+va de a uno por `POST /v1/habits/{id}/log`), `GET /v1/coach/clients/{id}/overview`
+(el overview viene embebido en el listado), `PATCH /v1/coach/assigned-exercises/{id}`
+(solo se puede editar la plantilla, no la copia asignada),
+`POST /v1/org/invitations` y `PATCH /v1/org/branding`.
 
 ## 7. Comandos
 
