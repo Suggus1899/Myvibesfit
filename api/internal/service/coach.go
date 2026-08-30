@@ -17,10 +17,6 @@ func NewCoachService(repo domain.CoachRepository) *CoachService {
 	return &CoachService{repo: repo}
 }
 
-// attentionThreshold: sin entrenar en mas de 3 dias con asignacion activa
-// es la definicion de "necesita atencion" para el overview del coach.
-const attentionThreshold = 3 * 24 * time.Hour
-
 type CoachClientOverview struct {
 	ClientUserID   uuid.UUID
 	FullName       string
@@ -45,8 +41,9 @@ func (s *CoachService) Clients(ctx context.Context, orgID, coachUserID uuid.UUID
 	for i, r := range rows {
 		hasAssignment := r.AssignmentStatus != ""
 
+		// La query devuelve 'epoch' cuando el cliente nunca entreno.
 		var lastSession *time.Time
-		if r.LastSessionAt.Unix() > 0 {
+		if !r.LastSessionAt.IsZero() && r.LastSessionAt.Year() > 1970 {
 			t := r.LastSessionAt
 			lastSession = &t
 		}
@@ -61,7 +58,7 @@ func (s *CoachService) Clients(ctx context.Context, orgID, coachUserID uuid.UUID
 			LastSessionAt:  lastSession,
 			StreakDays:     int(r.StreakDays),
 			RecentPRs:      int(r.RecentPRs),
-			NeedsAttention: hasAssignment && (lastSession == nil || now.Sub(*lastSession) > attentionThreshold),
+			NeedsAttention: domain.NeedsAttention(hasAssignment, lastSession, now),
 		}
 	}
 	return out, nil

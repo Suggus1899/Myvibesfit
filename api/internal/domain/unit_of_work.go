@@ -10,6 +10,7 @@ type TxRepos struct {
 	Sessions     SessionRepository
 	Gamification GamificationRepository
 	Habits       HabitRepository
+	Coaches      CoachRepository
 }
 
 type UnitOfWork interface {

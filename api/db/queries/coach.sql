@@ -24,3 +24,9 @@ LEFT JOIN LATERAL (
 ) pr ON true
 WHERE cc.org_id = $1 AND cc.coach_user_id = $2 AND cc.ended_at IS NULL
 ORDER BY u.full_name;
+
+-- name: LinkCoachClient :exec
+INSERT INTO coach_client (org_id, coach_user_id, client_user_id)
+VALUES ($1, $2, $3)
+ON CONFLICT (org_id, client_user_id) WHERE ended_at IS NULL
+DO UPDATE SET coach_user_id = EXCLUDED.coach_user_id;

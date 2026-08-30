@@ -107,6 +107,32 @@ func (h *HabitHandler) Unsubscribe(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (h *HabitHandler) LogsForDate(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.UserID(r.Context())
+	if !ok {
+		writeError(w, domain.ErrUnauthorized)
+		return
+	}
+	date, err := parseDate(r.URL.Query().Get("date"))
+	if err != nil {
+		writeError(w, domain.ErrInvalidInput)
+		return
+	}
+	logs, err := h.svc.LogsForDate(r.Context(), userID, date)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	out := make([]dto.HabitLogDTO, len(logs))
+	for i, l := range logs {
+		out[i] = dto.HabitLogDTO{
+			ID: l.ID, ClientHabitID: l.ClientHabitID, LogDate: l.LogDate.Format(dateLayout),
+			Value: l.Value, IsCompleted: l.IsCompleted,
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (h *HabitHandler) Log(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middleware.UserID(r.Context())
 	if !ok {

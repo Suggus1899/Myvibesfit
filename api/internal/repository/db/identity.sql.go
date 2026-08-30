@@ -283,6 +283,55 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (AppUser, error
 	return i, err
 }
 
+const listOrgMembers = `-- name: ListOrgMembers :many
+SELECT m.id AS membership_id, m.user_id, m.role, m.status, m.joined_at,
+       u.full_name, u.email, u.avatar_url
+FROM membership m
+JOIN app_user u ON u.id = m.user_id
+WHERE m.org_id = $1 AND m.status = 'active'
+ORDER BY u.full_name
+`
+
+type ListOrgMembersRow struct {
+	MembershipID uuid.UUID    `json:"membership_id"`
+	UserID       uuid.UUID    `json:"user_id"`
+	Role         MemberRole   `json:"role"`
+	Status       MemberStatus `json:"status"`
+	JoinedAt     *time.Time   `json:"joined_at"`
+	FullName     string       `json:"full_name"`
+	Email        string       `json:"email"`
+	AvatarUrl    pgtype.Text  `json:"avatar_url"`
+}
+
+func (q *Queries) ListOrgMembers(ctx context.Context, orgID uuid.UUID) ([]ListOrgMembersRow, error) {
+	rows, err := q.db.Query(ctx, listOrgMembers, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListOrgMembersRow{}
+	for rows.Next() {
+		var i ListOrgMembersRow
+		if err := rows.Scan(
+			&i.MembershipID,
+			&i.UserID,
+			&i.Role,
+			&i.Status,
+			&i.JoinedAt,
+			&i.FullName,
+			&i.Email,
+			&i.AvatarUrl,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const revokeRefreshTokenByHash = `-- name: RevokeRefreshTokenByHash :exec
 UPDATE refresh_token SET revoked_at = now() WHERE token_hash = $1
 `
@@ -299,4 +348,33 @@ UPDATE app_user SET last_login_at = now() WHERE id = $1
 func (q *Queries) TouchUserLogin(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, touchUserLogin, id)
 	return err
+}
+
+const updateMemberRole = `-- name: UpdateMemberRole :one
+UPDATE membership SET role = $3
+WHERE id = $1 AND org_id = $2 AND status = 'active'
+RETURNING id, org_id, user_id, role, status, invited_by, joined_at, created_at, updated_at
+`
+
+type UpdateMemberRoleParams struct {
+	ID    uuid.UUID  `json:"id"`
+	OrgID uuid.UUID  `json:"org_id"`
+	Role  MemberRole `json:"role"`
+}
+
+func (q *Queries) UpdateMemberRole(ctx context.Context, arg UpdateMemberRoleParams) (Membership, error) {
+	row := q.db.QueryRow(ctx, updateMemberRole, arg.ID, arg.OrgID, arg.Role)
+	var i Membership
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.UserID,
+		&i.Role,
+		&i.Status,
+		&i.InvitedBy,
+		&i.JoinedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }

@@ -42,6 +42,7 @@ type Querier interface {
 	GetActiveMembershipByUser(ctx context.Context, userID uuid.UUID) (Membership, error)
 	GetAssignmentByID(ctx context.Context, id uuid.UUID) (Assignment, error)
 	GetClientHabitOwner(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	GetClientProfile(ctx context.Context, userID uuid.UUID) (ClientProfile, error)
 	GetExerciseByID(ctx context.Context, id uuid.UUID) (Exercise, error)
 	GetHabitByID(ctx context.Context, id uuid.UUID) (Habit, error)
 	GetOrgMembership(ctx context.Context, arg GetOrgMembershipParams) (Membership, error)
@@ -59,6 +60,7 @@ type Querier interface {
 	GetUserStats(ctx context.Context, userID uuid.UUID) (UserStat, error)
 	GetUserStreak(ctx context.Context, arg GetUserStreakParams) (UserStreak, error)
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error
+	LinkCoachClient(ctx context.Context, arg LinkCoachClientParams) error
 	ListAchievements(ctx context.Context) ([]Achievement, error)
 	ListActiveAssignmentsForWorker(ctx context.Context) ([]ListActiveAssignmentsForWorkerRow, error)
 	ListAssignedExercises(ctx context.Context, assignedWorkoutID uuid.UUID) ([]AssignedExercise, error)
@@ -69,6 +71,7 @@ type Querier interface {
 	ListHabitLogsForDate(ctx context.Context, arg ListHabitLogsForDateParams) ([]HabitLog, error)
 	ListHabits(ctx context.Context, orgID pgtype.UUID) ([]Habit, error)
 	ListMyHabits(ctx context.Context, userID uuid.UUID) ([]ListMyHabitsRow, error)
+	ListOrgMembers(ctx context.Context, orgID uuid.UUID) ([]ListOrgMembersRow, error)
 	ListPendingSuggestionsForCoach(ctx context.Context, arg ListPendingSuggestionsForCoachParams) ([]ListPendingSuggestionsForCoachRow, error)
 	ListPersonalRecords(ctx context.Context, arg ListPersonalRecordsParams) ([]PersonalRecord, error)
 	ListProgramExercises(ctx context.Context, programWorkoutID uuid.UUID) ([]ProgramExercise, error)
@@ -87,10 +90,12 @@ type Querier interface {
 	TouchUserLogin(ctx context.Context, id uuid.UUID) error
 	UnsubscribeHabit(ctx context.Context, arg UnsubscribeHabitParams) error
 	UpdateExercise(ctx context.Context, arg UpdateExerciseParams) (Exercise, error)
+	UpdateMemberRole(ctx context.Context, arg UpdateMemberRoleParams) (Membership, error)
 	UpdateProgram(ctx context.Context, arg UpdateProgramParams) (Program, error)
 	UpdateProgramExercise(ctx context.Context, arg UpdateProgramExerciseParams) (ProgramExercise, error)
 	UpdateProgramWorkout(ctx context.Context, arg UpdateProgramWorkoutParams) (ProgramWorkout, error)
 	UpsertBodyMetric(ctx context.Context, arg UpsertBodyMetricParams) (BodyMetric, error)
+	UpsertClientProfile(ctx context.Context, arg UpsertClientProfileParams) (ClientProfile, error)
 	UpsertHabitLog(ctx context.Context, arg UpsertHabitLogParams) (HabitLog, error)
 	UpsertPersonalRecord(ctx context.Context, arg UpsertPersonalRecordParams) (PersonalRecord, error)
 	UpsertSessionExercise(ctx context.Context, arg UpsertSessionExerciseParams) (SessionExercise, error)

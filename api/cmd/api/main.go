@@ -2,9 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -27,7 +31,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
 	if err != nil {
 		logger.Error("db connect failed", "error", err)
@@ -54,6 +60,7 @@ func main() {
 	progressRepo := postgres.NewProgressRepository(queries)
 	coachRepo := postgres.NewCoachRepository(queries)
 	aiSuggestionRepo := postgres.NewAISuggestionRepository(queries)
+	profileRepo := postgres.NewProfileRepository(queries)
 	uow := postgres.NewUnitOfWork(pool)
 
 	authSvc := service.NewAuthService(identityRepo, signer, cfg.JWTRefreshTTL)
@@ -66,6 +73,7 @@ func main() {
 	habitSvc := service.NewHabitService(habitRepo, uow, gamificationSvc)
 	coachSvc := service.NewCoachService(coachRepo)
 	aiSuggestionSvc := service.NewAISuggestionService(aiSuggestionRepo, auditLogger)
+	profileSvc := service.NewProfileService(profileRepo)
 
 	router := apphttp.NewRouter(apphttp.Handlers{
 		Auth:         handler.NewAuthHandler(authSvc),
@@ -78,11 +86,33 @@ func main() {
 		Gamification: handler.NewGamificationHandler(gamificationRepo, gamificationSvc),
 		Coach:        handler.NewCoachHandler(coachSvc),
 		AISuggestion: handler.NewAISuggestionHandler(aiSuggestionSvc),
+		Profile:      handler.NewProfileHandler(profileSvc),
 	}, signer, cfg.CORSAllowedOrigins)
 
-	logger.Info("myvibesfit api starting", "port", cfg.Port, "env", cfg.Env)
-	if err := http.ListenAndServe(":"+cfg.Port, router); err != nil {
+	srv := &http.Server{Addr: ":" + cfg.Port, Handler: router}
+
+	// Apagado ordenado: sin esto un SIGTERM del orquestador mata el proceso
+	// con requests en vuelo y sin cerrar el pool.
+	serverErr := make(chan error, 1)
+	go func() {
+		logger.Info("myvibesfit api starting", "port", cfg.Port, "env", cfg.Env)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErr <- err
+		}
+	}()
+
+	select {
+	case err := <-serverErr:
 		logger.Error("server stopped", "error", err)
 		os.Exit(1)
+	case <-ctx.Done():
+		logger.Info("shutdown signal received, draining")
 	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		logger.Error("graceful shutdown failed", "error", err)
+	}
+	logger.Info("myvibesfit api stopped")
 }

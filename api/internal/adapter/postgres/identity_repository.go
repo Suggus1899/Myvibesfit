@@ -63,6 +63,10 @@ func (r *IdentityRepository) CreateOrganization(ctx context.Context, in domain.C
 		Name: in.Name, Slug: in.Slug, JoinCode: in.JoinCode, BrandColor: in.BrandColor,
 	})
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return domain.Organization{}, domain.ErrAlreadyExists
+		}
 		return domain.Organization{}, err
 	}
 	return toDomainOrganization(row), nil
@@ -102,6 +106,32 @@ func (r *IdentityRepository) CreateMembership(ctx context.Context, in domain.Cre
 
 func (r *IdentityRepository) GetActiveMembershipByUser(ctx context.Context, userID uuid.UUID) (domain.Membership, error) {
 	row, err := r.q.GetActiveMembershipByUser(ctx, userID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.Membership{}, domain.ErrNotFound
+		}
+		return domain.Membership{}, err
+	}
+	return toDomainMembership(row), nil
+}
+
+func (r *IdentityRepository) ListOrgMembers(ctx context.Context, orgID uuid.UUID) ([]domain.OrgMember, error) {
+	rows, err := r.q.ListOrgMembers(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.OrgMember, len(rows))
+	for i, row := range rows {
+		out[i] = domain.OrgMember{
+			MembershipID: row.MembershipID, UserID: row.UserID, Role: string(row.Role), Status: string(row.Status),
+			JoinedAt: row.JoinedAt, FullName: row.FullName, Email: row.Email, AvatarURL: pgTextToString(row.AvatarUrl),
+		}
+	}
+	return out, nil
+}
+
+func (r *IdentityRepository) UpdateMemberRole(ctx context.Context, membershipID, orgID uuid.UUID, role string) (domain.Membership, error) {
+	row, err := r.q.UpdateMemberRole(ctx, db.UpdateMemberRoleParams{ID: membershipID, OrgID: orgID, Role: db.MemberRole(role)})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.Membership{}, domain.ErrNotFound

@@ -43,9 +43,11 @@ func (s *JWTSigner) Sign(userID uuid.UUID, orgID *uuid.UUID, role string) (strin
 
 func (s *JWTSigner) Parse(tokenStr string) (*Claims, error) {
 	claims := &Claims{}
+	// WithValidMethods evita que un token alg=none/RS256 forjado sea aceptado:
+	// sin esto el keyfunc devuelve el secreto sin mirar el algoritmo.
 	token, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (interface{}, error) {
 		return s.secret, nil
-	})
+	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
 	if err != nil || !token.Valid {
 		return nil, ErrInvalidToken
 	}

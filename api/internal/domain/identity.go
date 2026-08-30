@@ -39,7 +39,11 @@ type Organization struct {
 // Membership.Role es MemberRole en Postgres (owner/admin/coach/client), pero
 // ningun service rama sobre su valor (RBAC ya opera en string via
 // middleware.Role) asi que se mantiene como string plano.
-const MemberRoleClient = "client"
+const (
+	MemberRoleClient  = "client"
+	MemberRoleOwner   = "owner"
+	DefaultBrandColor = "#C6FF4F"
+)
 
 type Membership struct {
 	ID        uuid.UUID
@@ -82,6 +86,19 @@ type CreateMembershipInput struct {
 	Role   string
 }
 
+// OrgMember es el read-model de ListOrgMembers: membership + datos del
+// usuario, para la pantalla de miembros del panel.
+type OrgMember struct {
+	MembershipID uuid.UUID
+	UserID       uuid.UUID
+	FullName     string
+	Email        string
+	AvatarURL    string
+	Role         string
+	Status       string
+	JoinedAt     *time.Time
+}
+
 type CreateRefreshTokenInput struct {
 	UserID      uuid.UUID
 	TokenHash   string
@@ -103,6 +120,8 @@ type IdentityRepository interface {
 
 	CreateMembership(ctx context.Context, in CreateMembershipInput) (Membership, error)
 	GetActiveMembershipByUser(ctx context.Context, userID uuid.UUID) (Membership, error)
+	ListOrgMembers(ctx context.Context, orgID uuid.UUID) ([]OrgMember, error)
+	UpdateMemberRole(ctx context.Context, membershipID, orgID uuid.UUID, role string) (Membership, error)
 
 	CreateRefreshToken(ctx context.Context, in CreateRefreshTokenInput) (RefreshToken, error)
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (RefreshToken, error)

@@ -82,6 +82,10 @@ func (s *AssignmentService) Assign(ctx context.Context, in AssignInput) (domain.
 		}
 		assignment = a
 
+		if err := repos.Coaches.LinkClient(ctx, in.OrgID, in.CoachUserID, in.ClientUserID); err != nil {
+			return err
+		}
+
 		for _, w := range workouts {
 			// day_index es un offset dentro de la semana (1-7), no un dia de
 			// calendario fijo: la fecha real se ancla a start_date.

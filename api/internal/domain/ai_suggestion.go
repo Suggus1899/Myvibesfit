@@ -3,6 +3,7 @@ package domain
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -95,6 +96,16 @@ type AssignmentSummary struct {
 	HabitAdherencePct float64         `json:"habit_adherence_pct"`
 	RecentPRs         []PRSummary     `json:"recent_prs"`
 	ExerciseTrends    []ExerciseTrend `json:"exercise_trends"`
+
+	// Contexto del onboarding (client_profile). Sin esto la IA propone a
+	// ciegas: no sabe si el cliente busca fuerza o bajar grasa, ni con que
+	// equipamiento cuenta, ni que lesiones tiene que esquivar.
+	PrimaryGoal        string   `json:"primary_goal,omitempty"`
+	Experience         string   `json:"experience,omitempty"`
+	DaysPerWeekTarget  int      `json:"days_per_week_target,omitempty"`
+	SessionMinutes     int      `json:"session_minutes_target,omitempty"`
+	AvailableEquipment []string `json:"available_equipment,omitempty"`
+	Limitations        string   `json:"limitations,omitempty"`
 }
 
 type PRSummary struct {
@@ -126,6 +137,15 @@ type Suggestion struct {
 	Payload    SuggestionPayload `json:"payload"`
 }
 
+// Topes de magnitud (docs/ARCHITECTURE.md §4): la IA propone ajustes
+// incrementales, no saltos. Un salto grande casi siempre es una alucinacion
+// o un error de unidades, y el coach no deberia siquiera tener que
+// rechazarlo a mano.
+const (
+	MaxLoadDeltaPercent   = 10.0
+	MaxVolumeDeltaPercent = 30.0
+)
+
 func (s Suggestion) Validate() error {
 	if !validSuggestionKinds[s.Kind] {
 		return fmt.Errorf("kind invalido: %q", s.Kind)
@@ -135,6 +155,18 @@ func (s Suggestion) Validate() error {
 	}
 	if s.Confidence < 0 || s.Confidence > 1 {
 		return fmt.Errorf("confidence fuera de rango: %v", s.Confidence)
+	}
+
+	delta := math.Abs(s.Payload.DeltaPercent)
+	switch s.Kind {
+	case "load_adjust":
+		if delta > MaxLoadDeltaPercent {
+			return fmt.Errorf("salto de carga %.1f%% supera el tope de %.0f%%", delta, MaxLoadDeltaPercent)
+		}
+	case "volume_adjust":
+		if delta > MaxVolumeDeltaPercent {
+			return fmt.Errorf("salto de volumen %.1f%% supera el tope de %.0f%%", delta, MaxVolumeDeltaPercent)
+		}
 	}
 	return nil
 }

@@ -25,6 +25,7 @@ type Handlers struct {
 	Gamification *handler.GamificationHandler
 	Coach        *handler.CoachHandler
 	AISuggestion *handler.AISuggestionHandler
+	Profile      *handler.ProfileHandler
 }
 
 func NewRouter(h Handlers, signer *platform.JWTSigner, corsOrigins []string) http.Handler {
@@ -65,6 +66,9 @@ func NewRouter(h Handlers, signer *platform.JWTSigner, corsOrigins []string) htt
 			r.Use(appmw.Auth(signer))
 
 			r.Get("/me", h.Auth.Me)
+			r.Get("/me/profile", h.Profile.Get)
+			r.Put("/me/profile", h.Profile.Save)
+			r.Post("/orgs", h.Auth.CreateOrg)
 			r.Post("/orgs/join", h.Auth.JoinOrg)
 			r.Get("/me/assignment/current", h.Assignment.CurrentForMe)
 			r.Get("/me/stats", h.Gamification.Stats)
@@ -80,6 +84,7 @@ func NewRouter(h Handlers, signer *platform.JWTSigner, corsOrigins []string) htt
 			r.Get("/body-metrics", h.Progress.ListBodyMetrics)
 
 			r.Get("/habits", h.Habit.List)
+			r.Get("/habits/logs", h.Habit.LogsForDate)
 			r.Get("/me/habits", h.Habit.MyHabits)
 			r.Post("/habits/subscribe", h.Habit.Subscribe)
 			r.Delete("/habits/{id}", h.Habit.Unsubscribe)
@@ -99,6 +104,13 @@ func NewRouter(h Handlers, signer *platform.JWTSigner, corsOrigins []string) htt
 			r.Group(func(r chi.Router) {
 				r.Use(appmw.RequireRole("owner", "admin", "coach"))
 				r.Use(appmw.RequireOrg)
+
+				r.Get("/org", h.Auth.GetOrg)
+				r.Get("/org/members", h.Auth.ListMembers)
+				r.Group(func(r chi.Router) {
+					r.Use(appmw.RequireRole("owner"))
+					r.Patch("/org/members/{id}/role", h.Auth.UpdateMemberRole)
+				})
 
 				r.Get("/progression-rules", h.Program.ListProgressionRules)
 				r.Post("/progression-rules", h.Program.CreateProgressionRule)

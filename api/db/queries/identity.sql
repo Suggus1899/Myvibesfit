@@ -46,3 +46,16 @@ SELECT * FROM membership
 WHERE user_id = $1 AND status = 'active'
 ORDER BY joined_at DESC
 LIMIT 1;
+
+-- name: ListOrgMembers :many
+SELECT m.id AS membership_id, m.user_id, m.role, m.status, m.joined_at,
+       u.full_name, u.email, u.avatar_url
+FROM membership m
+JOIN app_user u ON u.id = m.user_id
+WHERE m.org_id = $1 AND m.status = 'active'
+ORDER BY u.full_name;
+
+-- name: UpdateMemberRole :one
+UPDATE membership SET role = $3
+WHERE id = $1 AND org_id = $2 AND status = 'active'
+RETURNING *;

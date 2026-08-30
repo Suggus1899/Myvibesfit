@@ -26,6 +26,7 @@ type SuggestionWorkerService struct {
 	gamification domain.GamificationRepository
 	habits       domain.HabitRepository
 	progress     domain.ProgressRepository
+	profiles     domain.ProfileRepository
 	proposer     domain.SuggestionProposer
 	model        string
 }
@@ -35,6 +36,7 @@ func NewSuggestionWorkerService(
 	gamification domain.GamificationRepository,
 	habits domain.HabitRepository,
 	progress domain.ProgressRepository,
+	profiles domain.ProfileRepository,
 	proposer domain.SuggestionProposer,
 	model string,
 ) *SuggestionWorkerService {
@@ -43,7 +45,7 @@ func NewSuggestionWorkerService(
 	}
 	return &SuggestionWorkerService{
 		suggestions: suggestions, gamification: gamification, habits: habits,
-		progress: progress, proposer: proposer, model: model,
+		progress: progress, profiles: profiles, proposer: proposer, model: model,
 	}
 }
 
@@ -143,15 +145,28 @@ func (s *SuggestionWorkerService) buildSummary(ctx context.Context, assignmentID
 		})
 	}
 
+	// Un cliente que nunca completo el onboarding no tiene perfil: la IA
+	// pierde contexto pero el worker no debe fallar por eso.
+	profile, err := s.profiles.Get(ctx, userID)
+	if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		return domain.AssignmentSummary{}, err
+	}
+
 	return domain.AssignmentSummary{
-		ClientName:        clientName,
-		PeriodDays:        summaryPeriodDays,
-		AssignedWorkouts:  int(assignedWorkouts),
-		CompletedSessions: int(completedSessions),
-		CurrentStreakDays: int(streak.CurrentCount),
-		HabitAdherencePct: habitAdherence,
-		RecentPRs:         prs,
-		ExerciseTrends:    trends,
+		ClientName:         clientName,
+		PrimaryGoal:        profile.PrimaryGoal,
+		Experience:         profile.Experience,
+		DaysPerWeekTarget:  int(profile.DaysPerWeek),
+		SessionMinutes:     int(profile.SessionMinutes),
+		AvailableEquipment: profile.AvailableEquipment,
+		Limitations:        profile.Limitations,
+		PeriodDays:         summaryPeriodDays,
+		AssignedWorkouts:   int(assignedWorkouts),
+		CompletedSessions:  int(completedSessions),
+		CurrentStreakDays:  int(streak.CurrentCount),
+		HabitAdherencePct:  habitAdherence,
+		RecentPRs:          prs,
+		ExerciseTrends:     trends,
 	}, nil
 }
 

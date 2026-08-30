@@ -13,6 +13,24 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const linkCoachClient = `-- name: LinkCoachClient :exec
+INSERT INTO coach_client (org_id, coach_user_id, client_user_id)
+VALUES ($1, $2, $3)
+ON CONFLICT (org_id, client_user_id) WHERE ended_at IS NULL
+DO UPDATE SET coach_user_id = EXCLUDED.coach_user_id
+`
+
+type LinkCoachClientParams struct {
+	OrgID        uuid.UUID `json:"org_id"`
+	CoachUserID  uuid.UUID `json:"coach_user_id"`
+	ClientUserID uuid.UUID `json:"client_user_id"`
+}
+
+func (q *Queries) LinkCoachClient(ctx context.Context, arg LinkCoachClientParams) error {
+	_, err := q.db.Exec(ctx, linkCoachClient, arg.OrgID, arg.CoachUserID, arg.ClientUserID)
+	return err
+}
+
 const listCoachClients = `-- name: ListCoachClients :many
 SELECT
   cc.client_user_id,

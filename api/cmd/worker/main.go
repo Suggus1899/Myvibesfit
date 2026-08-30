@@ -9,6 +9,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"time"
 
 	anthropicsdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -28,7 +29,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	ctx := context.Background()
+	// Presupuesto total de la corrida: corre por cron una vez por noche, si
+	// Claude o Postgres se cuelgan no debe solaparse con la corrida siguiente.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
 	pool, err := pgxpool.New(ctx, dbURL)
 	if err != nil {
 		logger.Error("db connect failed", "error", err)
@@ -46,6 +51,7 @@ func main() {
 		postgres.NewGamificationRepository(queries),
 		postgres.NewHabitRepository(queries),
 		postgres.NewProgressRepository(queries),
+		postgres.NewProfileRepository(queries),
 		proposer,
 		model,
 	)

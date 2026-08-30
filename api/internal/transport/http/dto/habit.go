@@ -38,10 +38,11 @@ type LogHabitRequest struct {
 }
 
 type HabitLogDTO struct {
-	ID          int64   `json:"id"`
-	LogDate     string  `json:"log_date"`
-	Value       float64 `json:"value"`
-	IsCompleted bool    `json:"is_completed"`
+	ID            int64     `json:"id"`
+	ClientHabitID uuid.UUID `json:"client_habit_id,omitempty"`
+	LogDate       string    `json:"log_date"`
+	Value         float64   `json:"value"`
+	IsCompleted   bool      `json:"is_completed"`
 }
 
 type HabitLogResponse struct {
