@@ -1,3 +1,47 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+**`AGENTS.md` (repo root) is the authoritative doc** — stack, hexagonal architecture layers, current phase status, known debt, and full command list. Read it before working here; it's kept current by whoever last touched a given area, so prefer it over this summary if they disagree.
+
+## Commands
+
+Monorepo, three independently-run parts. Root scripts `run-api.cmd` (:8080), `run-coach-web.cmd` (:3000), `run-flutter-web.cmd` (:5555) already set the needed env vars for local native Postgres.
+
+```bash
+# Backend (api/) — Go, needs Postgres at DATABASE_URL
+cd api && goose -dir db/migrations postgres "$DATABASE_URL" up   # after adding a migration
+sqlc generate                                                     # after touching db/queries/*.sql
+go run ./cmd/api                                                  # server, :8080
+go run ./cmd/worker                                               # one-shot AI-suggestion pass, needs ANTHROPIC_API_KEY
+go vet ./... && go test ./... && go build ./... && gofmt -l .    # verify before commit
+go test ./internal/progression/...                                # single package, e.g.
+
+# Coach panel (web/) — Next.js 16 + TS + Tailwind + shadcn, pnpm
+cd web && pnpm dev      # :3000
+pnpm lint && pnpm build # verify before commit
+
+# Client app (app/) — Flutter + Riverpod + Drift
+cd app && flutter analyze && flutter test  # verify before commit
+flutter run -d chrome                       # or web-server; visually confirm UI changes here
+```
+
+## Architecture
+
+Multi-tenant gym training app: coach designs/supervises programs, client trains from mobile. A deterministic progression engine drives set-by-set load/rep suggestions; an AI worker layers supervised suggestions on top (never auto-applied — coach approves/rejects).
+
+- **`api/`** — Go, **hexagonal (ports & adapters)**, migrated from a coupled `handler → service → repository` deliberately at the user's request:
+  - `internal/domain/` — entities, 11 repository ports, `UnitOfWork`/`TxRepos` for the 3 multi-aggregate transactions (`Assign`, `SyncSessions`, `LogHabit`). No `pgx`/sqlc/anthropic-sdk imports — stdlib + `google/uuid` only.
+  - `internal/service/` — use cases; depend only on `domain` ports (verified with grep to have zero `pgx`/db imports).
+  - `internal/adapter/postgres/` — implements the ports over `internal/repository/db` (sqlc-generated, the only layer touching `pgtype`); translates `pgx.ErrNoRows` → `domain.ErrNotFound`.
+  - `internal/adapter/anthropic/` — implements `domain.SuggestionProposer` (Claude tool-use call for AI suggestions).
+  - `internal/transport/http/` — chi router, handlers, DTOs, JWT auth + RBAC middleware.
+  - `internal/progression/` — pure, DB-free progression engine (4 strategies, table-driven tests); not yet wired into any service flow.
+  - `cmd/api` (HTTP server) and `cmd/worker` (single-pass AI suggestion generator, meant for cron — no embedded scheduler).
+- **`web/`** — Next.js App Router coach panel; talks to the API via `src/lib/api.ts` (JWT in `localStorage`, auto-refresh on 401).
+- **`app/`** — Flutter client app; go_router with an auth-session guard, Drift for offline persistence on native (in-memory fallback on web).
+- **`docs/ARCHITECTURE.md`**, **`docs/DESIGN.md`**, **`docs/PHASES.md`** — decision log, design tokens/theming, phased build plan.
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
