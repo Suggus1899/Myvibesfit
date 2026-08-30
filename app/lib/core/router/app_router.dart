@@ -9,8 +9,14 @@ import '../../features/auth/splash_screen.dart';
 import '../../features/habits/habits_screen.dart';
 import '../../features/home/home_screen.dart';
 import '../../features/home/home_shell.dart';
+import '../../features/exercises/exercise_detail_screen.dart';
+import '../../features/progress/body_metrics_screen.dart';
 import '../../features/progress/progress_screen.dart';
+import '../../features/settings/profile_screen.dart';
+import '../../features/settings/settings_screen.dart';
 import '../../features/workout/active_workout_screen.dart';
+import '../../features/workout/session_history_screen.dart';
+import '../../features/workout/weekly_plan_screen.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   final authStatus = ref.watch(authControllerProvider).status;
@@ -35,6 +41,15 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/splash', builder: (context, state) => const SplashScreen()),
       GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
       GoRoute(path: '/register', builder: (context, state) => const RegisterScreen()),
+      GoRoute(path: '/settings', builder: (context, state) => const SettingsScreen()),
+      GoRoute(path: '/profile', builder: (context, state) => const ProfileScreen()),
+      GoRoute(path: '/plan', builder: (context, state) => const WeeklyPlanScreen()),
+      GoRoute(path: '/history', builder: (context, state) => const SessionHistoryScreen()),
+      GoRoute(path: '/body-metrics', builder: (context, state) => const BodyMetricsScreen()),
+      GoRoute(
+        path: '/exercises/:id',
+        builder: (context, state) => ExerciseDetailScreen(exerciseId: state.pathParameters['id']!),
+      ),
       ShellRoute(
         builder: (context, state, child) => HomeShell(location: state.matchedLocation, child: child),
         routes: [

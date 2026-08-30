@@ -6,6 +6,7 @@ import '../../core/network/models.dart';
 import '../../core/providers.dart';
 import '../../core/theme/app_colors.dart';
 import '../auth/auth_providers.dart';
+import '../workout/workout_providers.dart';
 
 final statsProvider = FutureProvider.autoDispose<UserStats>((ref) => ref.watch(apiRepositoryProvider).stats());
 final currentAssignmentProvider = FutureProvider.autoDispose<CurrentAssignment?>((ref) => ref.watch(apiRepositoryProvider).currentAssignment());
@@ -24,6 +25,10 @@ class HomeScreen extends ConsumerWidget {
         title: const Text('Myvibesfit'),
         actions: [
           IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            onPressed: () => context.push('/settings'),
+          ),
+          IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () => ref.read(authControllerProvider.notifier).logout(),
           ),
@@ -33,10 +38,12 @@ class HomeScreen extends ConsumerWidget {
         onRefresh: () async {
           ref.invalidate(statsProvider);
           ref.invalidate(currentAssignmentProvider);
+          ref.invalidate(pendingSyncCountProvider);
         },
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            const _PendingSyncBanner(),
             statsAsync.when(
               data: (stats) => _StreakAndXpRow(stats: stats),
               loading: () => const SizedBox(height: 100, child: Center(child: CircularProgressIndicator())),
@@ -49,6 +56,46 @@ class HomeScreen extends ConsumerWidget {
               error: (e, _) => const SizedBox.shrink(),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PendingSyncBanner extends ConsumerWidget {
+  const _PendingSyncBanner();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final colors = context.colors;
+    final pending = ref.watch(pendingSyncCountProvider).valueOrNull ?? 0;
+    if (pending == 0) return const SizedBox.shrink();
+
+    final syncing = ref.watch(syncQueueProvider);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Card(
+        color: colors.warning.withValues(alpha: 0.12),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              Icon(Icons.cloud_off, color: colors.warning),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text('$pending entrenamiento${pending > 1 ? "s" : ""} sin sincronizar', style: TextStyle(color: colors.text)),
+              ),
+              TextButton(
+                onPressed: syncing
+                    ? null
+                    : () async {
+                        await ref.read(syncQueueProvider.notifier).syncNow();
+                        ref.invalidate(pendingSyncCountProvider);
+                      },
+                child: syncing ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Reintentar'),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -156,6 +203,7 @@ class _TodayWorkoutCard extends StatelessWidget {
               onPressed: () => context.go('/workout'),
               child: const Text('Empezar entrenamiento'),
             ),
+            TextButton(onPressed: () => context.push('/plan'), child: const Text('Ver plan completo')),
           ],
         ),
       ),

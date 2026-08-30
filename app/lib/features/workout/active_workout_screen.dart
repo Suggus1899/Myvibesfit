@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/network/models.dart';
 import '../../core/providers.dart';
@@ -102,10 +103,18 @@ class _InProgressView extends ConsumerWidget {
             padding: const EdgeInsets.all(16),
             child: ElevatedButton(
               onPressed: () async {
-                await ref.read(activeWorkoutProvider.notifier).finish();
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Entrenamiento guardado')));
+                final result = await ref.read(activeWorkoutProvider.notifier).finish();
+                if (!context.mounted) return;
+                final rewardParts = <String>[];
+                if (result != null && result.newPersonalRecords > 0) {
+                  rewardParts.add('${result.newPersonalRecords} PR${result.newPersonalRecords > 1 ? "s" : ""} nuevo${result.newPersonalRecords > 1 ? "s" : ""} 🎉');
                 }
+                if (result != null && result.unlockedAchievements.isNotEmpty) {
+                  rewardParts.add('🏆 ${result.unlockedAchievements.map((a) => a.name).join(", ")}');
+                }
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text(rewardParts.isEmpty ? 'Entrenamiento guardado' : 'Entrenamiento guardado — ${rewardParts.join(" · ")}'),
+                ));
               },
               child: const Text('Terminar entrenamiento'),
             ),
@@ -123,6 +132,8 @@ class _ExerciseCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final catalog = ref.watch(exerciseCatalogProvider).valueOrNull ?? const <ExerciseSummary>[];
+    final displayName = resolveExerciseName(catalog, exercise.exerciseId, fallback: exercise.name);
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
@@ -130,7 +141,15 @@ class _ExerciseCard extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(exercise.name, style: Theme.of(context).textTheme.titleLarge),
+            InkWell(
+              onTap: () => context.push('/exercises/${exercise.exerciseId}'),
+              child: Row(
+                children: [
+                  Expanded(child: Text(displayName, style: Theme.of(context).textTheme.titleLarge)),
+                  const Icon(Icons.info_outline, size: 18),
+                ],
+              ),
+            ),
             const SizedBox(height: 8),
             ...exercise.sets.asMap().entries.map((entry) => _SetRow(exerciseIndex: exerciseIndex, setIndex: entry.key, set: entry.value)),
             TextButton.icon(
@@ -174,8 +193,9 @@ class _SetRowState extends ConsumerState<_SetRow> {
           Expanded(child: _Stepper(label: 'reps', value: _reps.toDouble(), step: 1, onChanged: (v) => setState(() => _reps = v.toInt()))),
           const SizedBox(width: 12),
           IconButton(
+            // Peso 0 es valido (ejercicios con peso corporal); 0 reps no lo es.
             icon: Icon(completed ? Icons.check_circle : Icons.check_circle_outline, color: completed ? colors.success : colors.textMuted),
-            onPressed: completed
+            onPressed: completed || _reps <= 0
                 ? null
                 : () => ref.read(activeWorkoutProvider.notifier).completeSet(widget.exerciseIndex, widget.setIndex, weightKg: _weight, reps: _reps),
           ),

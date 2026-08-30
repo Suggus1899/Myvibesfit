@@ -1,6 +1,7 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/network/models.dart';
 import '../../core/providers.dart';
@@ -22,7 +23,21 @@ class ProgressScreen extends ConsumerWidget {
     final recordsAsync = ref.watch(recordsProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Progreso')),
+      appBar: AppBar(
+        title: const Text('Progreso'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.monitor_weight_outlined),
+            tooltip: 'Peso y medidas',
+            onPressed: () => context.push('/body-metrics'),
+          ),
+          IconButton(
+            icon: const Icon(Icons.history),
+            tooltip: 'Historial',
+            onPressed: () => context.push('/history'),
+          ),
+        ],
+      ),
       body: recordsAsync.when(
         data: (records) {
           if (records.isEmpty) {
@@ -55,6 +70,8 @@ class _ExerciseRecordsCard extends ConsumerWidget {
     final selected = ref.watch(selectedExerciseProvider) == exerciseId;
     final maxWeightRecords = records.where((r) => r.type == 'max_weight');
     final maxWeight = maxWeightRecords.isEmpty ? null : maxWeightRecords.first.value;
+    final catalog = ref.watch(exerciseCatalogProvider).valueOrNull ?? const <ExerciseSummary>[];
+    final name = resolveExerciseName(catalog, exerciseId);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -66,7 +83,12 @@ class _ExerciseRecordsCard extends ConsumerWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(exerciseId.substring(0, 8), style: Theme.of(context).textTheme.titleLarge),
+                Expanded(
+                  child: InkWell(
+                    onTap: () => context.push('/exercises/$exerciseId'),
+                    child: Text(name, style: Theme.of(context).textTheme.titleLarge),
+                  ),
+                ),
                 if (maxWeight != null) Text('${maxWeight.toStringAsFixed(1)} kg', style: TextStyle(color: colors.brand, fontWeight: FontWeight.w800)),
               ],
             ),

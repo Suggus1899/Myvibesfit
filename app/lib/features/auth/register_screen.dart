@@ -37,15 +37,29 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     });
     try {
       await ref.read(authControllerProvider.notifier).register(_emailCtrl.text.trim(), _passwordCtrl.text, _nameCtrl.text.trim());
-      final joinCode = _joinCodeCtrl.text.trim();
-      if (joinCode.isNotEmpty) {
-        await ref.read(apiRepositoryProvider).joinOrg(joinCode);
-      }
     } catch (e) {
-      setState(() => _error = 'No se pudo crear la cuenta. ¿El correo ya existe?');
-    } finally {
+      // La cuenta no se creo: este es el unico caso donde el error es sobre
+      // el registro en si.
+      if (mounted) setState(() => _error = 'No se pudo crear la cuenta. ¿El correo ya existe?');
       if (mounted) setState(() => _loading = false);
+      return;
     }
+
+    final joinCode = _joinCodeCtrl.text.trim();
+    if (joinCode.isNotEmpty) {
+      try {
+        await ref.read(apiRepositoryProvider).joinOrg(joinCode);
+      } catch (e) {
+        // La cuenta ya existe y ya esta autenticada (register() la dejo asi);
+        // un codigo invalido no es un fallo de registro, se puede unir despues.
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Cuenta creada. El código de gimnasio no era válido — podés unirte después.')),
+          );
+        }
+      }
+    }
+    if (mounted) setState(() => _loading = false);
   }
 
   @override

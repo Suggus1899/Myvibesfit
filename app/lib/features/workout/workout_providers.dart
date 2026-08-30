@@ -130,9 +130,9 @@ class ActiveWorkoutController extends StateNotifier<WorkoutSessionState?> {
     _ref.read(restTimerProvider.notifier).start(current.exercises[exerciseIndex].restSeconds);
   }
 
-  Future<void> finish() async {
+  Future<SyncResult?> finish() async {
     final current = state;
-    if (current == null) return;
+    if (current == null) return null;
 
     final localSession = LocalSession(
       localId: current.localId,
@@ -166,7 +166,7 @@ class ActiveWorkoutController extends StateNotifier<WorkoutSessionState?> {
     await _ref.read(workoutStoreProvider).saveSession(localSession);
     state = null;
     _ref.read(restTimerProvider.notifier).cancel();
-    await _ref.read(syncQueueProvider.notifier).syncNow();
+    return _ref.read(syncQueueProvider.notifier).syncNow();
   }
 
   void discard() {
@@ -224,13 +224,13 @@ class SyncQueueController extends StateNotifier<bool> {
   SyncQueueController(this._ref) : super(false);
   final Ref _ref;
 
-  Future<void> syncNow() async {
-    if (state) return; // ya sincronizando
+  Future<SyncResult?> syncNow() async {
+    if (state) return null; // ya sincronizando
     state = true;
     try {
       final store = _ref.read(workoutStoreProvider);
       final pending = await store.unsyncedSessions();
-      if (pending.isEmpty) return;
+      if (pending.isEmpty) return null;
 
       final api = _ref.read(apiRepositoryProvider);
       final payload = pending
@@ -263,13 +263,15 @@ class SyncQueueController extends StateNotifier<bool> {
               })
           .toList();
 
-      await api.syncSessions(payload);
+      final result = await api.syncSessions(payload);
       for (final s in pending) {
         await store.markSynced(s.localId);
       }
+      return result;
     } catch (_) {
-      // sin red: se reintenta en el proximo syncNow() (al terminar otro
-      // entrenamiento, o cuando la UI lo dispare manualmente)
+      // sin red: se reintenta al reabrir la app, al volver a foreground, o
+      // cuando la UI lo dispare manualmente (ver pendingSyncCountProvider).
+      return null;
     } finally {
       state = false;
     }
@@ -277,3 +279,10 @@ class SyncQueueController extends StateNotifier<bool> {
 }
 
 final syncQueueProvider = StateNotifierProvider<SyncQueueController, bool>((ref) => SyncQueueController(ref));
+
+/// Cuantas sesiones locales todavia no llegaron al servidor. La UI lo usa
+/// para mostrar un aviso + boton de reintento manual.
+final pendingSyncCountProvider = FutureProvider.autoDispose<int>((ref) async {
+  final pending = await ref.watch(workoutStoreProvider).unsyncedSessions();
+  return pending.length;
+});

@@ -71,7 +71,7 @@ class MockApiRepository implements ApiRepository {
       });
 
   @override
-  Future<Map<String, dynamic>> syncSessions(List<Map<String, dynamic>> sessions) async => {'synced': sessions.length};
+  Future<SyncResult> syncSessions(List<Map<String, dynamic>> sessions) async => SyncResult.fromJson({'new_personal_records': 0, 'unlocked_achievements': []});
 
   @override
   Future<UserStats> stats() async => UserStats.fromJson({
@@ -108,7 +108,63 @@ class MockApiRepository implements ApiRepository {
   Future<void> subscribeHabit(String habitId) async {}
 
   @override
-  Future<void> logHabit({required String clientHabitId, required String clientLocalId, required String logDate}) async {}
+  Future<void> unsubscribeHabit(String clientHabitId) async {}
+
+  @override
+  Future<Set<String>> habitLogsForDate(String date) async => {};
+
+  @override
+  Future<List<UserAchievementInfo>> logHabit({required String clientHabitId, required String clientLocalId, required String logDate}) async => [];
+
+  @override
+  Future<ClientProfile> profile() async => ClientProfile.fromJson({
+        'sex': 'unspecified',
+        'experience': 'intermediate',
+        'primary_goal': 'hypertrophy',
+        'days_per_week': 4,
+        'session_minutes': 60,
+        'available_equipment': ['barbell', 'dumbbell'],
+        'unit_system': 'metric',
+        'is_onboarded': true,
+      });
+
+  @override
+  Future<ClientProfile> saveProfile({
+    required String sex,
+    required String experience,
+    required String primaryGoal,
+    required int daysPerWeek,
+    required int sessionMinutes,
+    required String unitSystem,
+    double? heightCm,
+    List<String>? availableEquipment,
+    String? limitations,
+  }) async =>
+      profile();
+
+  @override
+  Future<ExerciseDetail> exercise(String id) async => ExerciseDetail.fromJson({
+        'id': id,
+        'name': 'Ejercicio demo',
+        'description': 'Ejercicio de ejemplo para el modo demo.',
+        'instructions': ['Colocate en posición inicial', 'Ejecutá el movimiento con control', 'Volvé a la posición inicial'],
+        'pattern': 'squat',
+        'primary_muscle': 'quads',
+        'secondary_muscles': ['glutes'],
+        'equipment': ['barbell'],
+        'difficulty': 'intermediate',
+        'is_unilateral': false,
+        'video_url': '',
+      });
+
+  @override
+  Future<void> logBodyMetric({required String measuredOn, double? weightKg, double? bodyFatPct, String? note}) async {}
+
+  @override
+  Future<List<BodyMetric>> bodyMetrics() async => [
+        {'measured_on': _daysAgo(7).toIso8601String().substring(0, 10), 'weight_kg': 78.5, 'body_fat_pct': 18.0, 'note': ''},
+        {'measured_on': _daysAgo(0).toIso8601String().substring(0, 10), 'weight_kg': 78.0, 'body_fat_pct': 17.5, 'note': ''},
+      ].map((j) => BodyMetric.fromJson(j)).toList();
 
   @override
   Future<List<PersonalRecordInfo>> records() async => [

@@ -36,14 +36,53 @@ class ApiRepository {
     return AuthUser.fromJson(res.data);
   }
 
+  Future<ClientProfile> profile() async {
+    final res = await _dio.get('/v1/me/profile');
+    return ClientProfile.fromJson(res.data);
+  }
+
+  Future<ClientProfile> saveProfile({
+    required String sex,
+    required String experience,
+    required String primaryGoal,
+    required int daysPerWeek,
+    required int sessionMinutes,
+    required String unitSystem,
+    double? heightCm,
+    List<String>? availableEquipment,
+    String? limitations,
+  }) async {
+    final res = await _dio.put('/v1/me/profile', data: {
+      'sex': sex,
+      'experience': experience,
+      'primary_goal': primaryGoal,
+      'days_per_week': daysPerWeek,
+      'session_minutes': sessionMinutes,
+      'unit_system': unitSystem,
+      'height_cm': heightCm,
+      'available_equipment': availableEquipment ?? [],
+      'limitations': limitations ?? '',
+    });
+    return ClientProfile.fromJson(res.data);
+  }
+
   Future<AuthResult> joinOrg(String joinCode) async {
     final res = await _dio.post('/v1/orgs/join', data: {'join_code': joinCode});
-    return AuthResult.fromJson(res.data);
+    final result = AuthResult.fromJson(res.data);
+    // A diferencia de login/register, esto se olvidaba de guardar los tokens
+    // nuevos: el JWT en disco quedaba sin org_id hasta el proximo refresh.
+    await _tokenStorage.save(accessToken: result.accessToken, refreshToken: result.refreshToken);
+    return result;
   }
 
   Future<List<ExerciseSummary>> exercises({String? pattern}) async {
     final res = await _dio.get('/v1/exercises', queryParameters: {'pattern': ?pattern, 'limit': 100});
     return (res.data as List).map((e) => ExerciseSummary.fromJson(e)).toList();
+  }
+
+  Future<ExerciseDetail> exercise(String id) async {
+    final res = await _dio.get('/v1/exercises/$id');
+    return ExerciseDetail.fromJson(res.data);
   }
 
   Future<CurrentAssignment?> currentAssignment() async {
@@ -56,9 +95,9 @@ class ApiRepository {
     }
   }
 
-  Future<Map<String, dynamic>> syncSessions(List<Map<String, dynamic>> sessions) async {
+  Future<SyncResult> syncSessions(List<Map<String, dynamic>> sessions) async {
     final res = await _dio.post('/v1/sync/sessions', data: {'sessions': sessions});
-    return res.data as Map<String, dynamic>;
+    return SyncResult.fromJson(res.data as Map<String, dynamic>);
   }
 
   Future<UserStats> stats() async {
@@ -85,13 +124,26 @@ class ApiRepository {
     await _dio.post('/v1/habits/subscribe', data: {'habit_id': habitId, 'frequency': 'daily'});
   }
 
-  Future<void> logHabit({required String clientHabitId, required String clientLocalId, required String logDate}) async {
-    await _dio.post('/v1/habits/$clientHabitId/log', data: {
+  Future<void> unsubscribeHabit(String clientHabitId) async {
+    await _dio.delete('/v1/habits/$clientHabitId');
+  }
+
+  /// Ids de client_habit ya marcados en la fecha dada — permite que la UI
+  /// arranque con el estado real del servidor en vez de asumir "sin marcar".
+  Future<Set<String>> habitLogsForDate(String date) async {
+    final res = await _dio.get('/v1/habits/logs', queryParameters: {'date': date});
+    return (res.data as List).map((l) => l['client_habit_id'] as String).toSet();
+  }
+
+  Future<List<UserAchievementInfo>> logHabit({required String clientHabitId, required String clientLocalId, required String logDate}) async {
+    final res = await _dio.post('/v1/habits/$clientHabitId/log', data: {
       'client_local_id': clientLocalId,
       'log_date': logDate,
       'value': 1,
       'is_completed': true,
     });
+    final unlocked = (res.data as Map<String, dynamic>)['unlocked_achievements'] as List? ?? [];
+    return unlocked.map((a) => UserAchievementInfo.fromJson(a)).toList();
   }
 
   Future<List<PersonalRecordInfo>> records() async {
@@ -102,5 +154,19 @@ class ApiRepository {
   Future<List<SetLogPoint>> exerciseHistory(String exerciseId) async {
     final res = await _dio.get('/v1/progress/exercises/$exerciseId', queryParameters: {'days': 365});
     return (res.data as List).map((s) => SetLogPoint.fromJson(s)).toList();
+  }
+
+  Future<void> logBodyMetric({required String measuredOn, double? weightKg, double? bodyFatPct, String? note}) async {
+    await _dio.post('/v1/body-metrics', data: {
+      'measured_on': measuredOn,
+      'weight_kg': weightKg,
+      'body_fat_pct': bodyFatPct,
+      'note': note ?? '',
+    });
+  }
+
+  Future<List<BodyMetric>> bodyMetrics() async {
+    final res = await _dio.get('/v1/body-metrics');
+    return (res.data as List).map((m) => BodyMetric.fromJson(m)).toList();
   }
 }

@@ -12,10 +12,17 @@ class AuthState {
 
 class AuthController extends StateNotifier<AuthState> {
   AuthController(this._ref) : super(const AuthState()) {
+    _ref.read(apiClientProvider).onSessionExpired = _handleSessionExpired;
     _bootstrap();
   }
 
   final Ref _ref;
+
+  void _handleSessionExpired() {
+    if (state.status != AuthStatus.unauthenticated) {
+      state = const AuthState(status: AuthStatus.unauthenticated);
+    }
+  }
 
   Future<void> _bootstrap() async {
     final hasSession = await _ref.read(apiRepositoryProvider).hasSession();

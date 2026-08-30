@@ -30,6 +30,8 @@ class ApiClient {
             } catch (_) {
               // cae al error original
             }
+          } else {
+            onSessionExpired?.call();
           }
         }
         handler.next(error);
@@ -40,6 +42,12 @@ class ApiClient {
   final Dio dio;
   final TokenStorage _tokenStorage;
   Future<String?>? _refreshing;
+
+  /// Se dispara cuando un refresh falla y la sesion queda invalida en el
+  /// servidor. Sin esto el AuthController nunca se entera: el guard no
+  /// redirige a /login y cada request sigue fallando en silencio hasta que
+  /// el usuario mata la app (sesion "zombi").
+  void Function()? onSessionExpired;
 
   bool _isRetry(RequestOptions options) => options.extra['retried'] == true;
 

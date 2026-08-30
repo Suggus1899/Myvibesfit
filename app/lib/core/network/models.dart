@@ -150,6 +150,85 @@ class SetLogPoint {
         performedAt = j['performed_at'];
 }
 
+class ClientProfile {
+  final String sex;
+  final double? heightCm;
+  final String experience;
+  final String primaryGoal;
+  final int daysPerWeek;
+  final int sessionMinutes;
+  final List<String> availableEquipment;
+  final String limitations;
+  final String unitSystem;
+  final bool isOnboarded;
+
+  ClientProfile.fromJson(Map<String, dynamic> j)
+      : sex = j['sex'] ?? 'unspecified',
+        heightCm = (j['height_cm'] as num?)?.toDouble(),
+        experience = j['experience'] ?? 'beginner',
+        primaryGoal = j['primary_goal'] ?? 'general_health',
+        daysPerWeek = j['days_per_week'] ?? 3,
+        sessionMinutes = j['session_minutes'] ?? 60,
+        availableEquipment = (j['available_equipment'] as List? ?? []).cast<String>(),
+        limitations = j['limitations'] ?? '',
+        unitSystem = j['unit_system'] ?? 'metric',
+        isOnboarded = j['is_onboarded'] ?? false;
+
+  bool get isImperial => unitSystem == 'imperial';
+}
+
+class ExerciseDetail {
+  final String id;
+  final String name;
+  final String description;
+  final List<String> instructions;
+  final String pattern;
+  final String primaryMuscle;
+  final List<String> secondaryMuscles;
+  final List<String> equipment;
+  final String difficulty;
+  final bool isUnilateral;
+  final String videoUrl;
+
+  ExerciseDetail.fromJson(Map<String, dynamic> j)
+      : id = j['id'],
+        name = j['name'],
+        description = j['description'] ?? '',
+        instructions = (j['instructions'] as List? ?? []).cast<String>(),
+        pattern = j['pattern'] ?? '',
+        primaryMuscle = j['primary_muscle'] ?? '',
+        secondaryMuscles = (j['secondary_muscles'] as List? ?? []).cast<String>(),
+        equipment = (j['equipment'] as List? ?? []).cast<String>(),
+        difficulty = j['difficulty'] ?? '',
+        isUnilateral = j['is_unilateral'] ?? false,
+        videoUrl = j['video_url'] ?? '';
+}
+
+class BodyMetric {
+  final String measuredOn;
+  final double? weightKg;
+  final double? bodyFatPct;
+  final String note;
+
+  BodyMetric.fromJson(Map<String, dynamic> j)
+      : measuredOn = j['measured_on'],
+        weightKg = (j['weight_kg'] as num?)?.toDouble(),
+        bodyFatPct = (j['body_fat_pct'] as num?)?.toDouble(),
+        note = j['note'] ?? '';
+}
+
+class SyncResult {
+  final int newPersonalRecords;
+  final List<UserAchievementInfo> unlockedAchievements;
+
+  SyncResult.fromJson(Map<String, dynamic> j)
+      : newPersonalRecords = j['new_personal_records'] ?? 0,
+        unlockedAchievements =
+            (j['unlocked_achievements'] as List? ?? []).map((a) => UserAchievementInfo.fromJson(a)).toList();
+
+  bool get hasRewards => newPersonalRecords > 0 || unlockedAchievements.isNotEmpty;
+}
+
 class UserAchievementInfo {
   final String code;
   final String name;
