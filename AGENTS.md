@@ -156,11 +156,16 @@ Tailwind v4 + shadcn/ui, `pnpm lint` y `pnpm build` limpios:
   `org_id` reales desde el contexto de auth. Verificado con
   `go build/vet/test` limpios; no se probó con curl porque esta sesión
   corrió sin levantar el servidor (ver nota de entorno).
-- **Fuera de alcance en este entorno** (requieren VPS real): push
-  notifications (`device_token` existe en el esquema pero sin endpoint),
-  backups automáticos de Postgres, monitoreo (logs+métricas) del VPS,
-  prueba de carga de 100 usuarios concurrentes, políticas de privacidad de
-  fotos de progreso (es texto/producto, no código).
+- **Fuera de alcance en este entorno** (requieren VPS o cuentas reales):
+  backups automáticos de Postgres, monitoreo del VPS, prueba de carga de 100
+  usuarios concurrentes, y el cron del worker (especificado en
+  [SDD-003](docs/sdd/active/SDD-003-worker-operation.md)).
+  Las **push notifications ya no están aquí**: el backend está construido y
+  verificado en vivo (queries, repositorio, `PushSender`, adapter FCM sobre
+  HTTP v1, dos endpoints y el aviso al asignar un programa). Lo que falta es
+  la integración Flutter y la entrega real, que sí necesita un proyecto
+  Firebase y un dispositivo físico. Ver
+  [SDD-001](docs/sdd/active/SDD-001-push-notifications.md).
 
 ## Tests
 
@@ -170,9 +175,12 @@ Tailwind v4 + shadcn/ui, `pnpm lint` y `pnpm build` limpios:
   (acumulación de XP y nivel, los 4 casos de borde de `BumpStreak`, y que
   `CheckAchievements` no redesbloquea), `Suggestion.Validate` (incluidos los
   topes de magnitud) y `NeedsAttention`.
-- **Sin cubrir todavía**: `AssignmentService.Assign` y
-  `SyncService.SyncSessions` (los dos flujos transaccionales — necesitan un
-  `UnitOfWork` falso), y los handlers/middleware HTTP.
+- **Cubierto desde entonces**: `SyncService.SyncSessions` (6 tests con un
+  `UnitOfWork` falso, incluida la progresión y el no-repetir-recompensas en un
+  reenvío), `NotificationService` y el middleware de auth/RBAC
+  (`internal/transport/http/middleware`, 21 casos: firma forjada, token
+  expirado, JWT sin `org_id`, `RequireRole` con lista vacía).
+- **Sin cubrir todavía**: `AssignmentService.Assign` y los **handlers** HTTP.
 - **Flutter**: solo `AppColors`. Faltan router/redirects, `AuthController`,
   cola de sync y `WorkoutStore`.
 
@@ -200,10 +208,11 @@ documentado — no hace falta volver a auditar, están confirmados:
   `SessionRepository.CountCompletedSessionsOnDate`,
   `HabitRepository.GetHabitByID`, `ProgramRepository.GetProgressionRuleByID`,
   `AISuggestionRepository.GetByID`.
-- **`internal/progression/` no tiene importadores**: el motor de progresión
-  está construido y testeado pero todavía no se llama desde ningún flujo.
-- **Tablas modeladas sin uso**: `progress_photo`, `exercise_alternative`,
-  `device_token` (push), `user_identity` (OAuth).
+- **Tablas modeladas sin uso**: `progress_photo` (ya especificada en
+  [SDD-002](docs/sdd/active/SDD-002-progress-photos.md)), `exercise_alternative`,
+  `user_identity` (OAuth). Ya no aplica a `device_token`: tiene queries,
+  repositorio, endpoints y adapter desde SDD-001. Tampoco a
+  `internal/progression/`, que hoy se llama desde `SyncService` (`sync.go:11`).
 
 **Siguiente paso:** conseguir un VPS real para cerrar el resto de fase 10
 (push, backups, monitoreo, prueba de carga, cron del worker).
