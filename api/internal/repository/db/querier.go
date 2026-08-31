@@ -61,7 +61,12 @@ type Querier interface {
 	GetUserByEmail(ctx context.Context, email string) (AppUser, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (AppUser, error)
 	GetUserStats(ctx context.Context, userID uuid.UUID) (UserStat, error)
+	// Variante con lock de fila para el read-modify-write de ApplyStatsDelta.
+	// La version sin lock se usa en las lecturas de solo lectura (/me/stats),
+	// que no deberian bloquear a nadie.
+	GetUserStatsForUpdate(ctx context.Context, userID uuid.UUID) (UserStat, error)
 	GetUserStreak(ctx context.Context, arg GetUserStreakParams) (UserStreak, error)
+	GetUserStreakForUpdate(ctx context.Context, arg GetUserStreakForUpdateParams) (UserStreak, error)
 	GetWorkoutAssignmentID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error
 	LinkCoachClient(ctx context.Context, arg LinkCoachClientParams) error
@@ -78,6 +83,9 @@ type Querier interface {
 	ListOrgMembers(ctx context.Context, orgID uuid.UUID) ([]ListOrgMembersRow, error)
 	ListPendingSuggestionsForCoach(ctx context.Context, arg ListPendingSuggestionsForCoachParams) ([]ListPendingSuggestionsForCoachRow, error)
 	ListPersonalRecords(ctx context.Context, arg ListPersonalRecordsParams) ([]PersonalRecord, error)
+	// Los 4 tipos de record de un ejercicio en una sola ida a la base: antes se
+	// consultaba uno por uno por cada serie de trabajo.
+	ListPersonalRecordsForExercise(ctx context.Context, arg ListPersonalRecordsForExerciseParams) ([]PersonalRecord, error)
 	ListProgramExercises(ctx context.Context, programWorkoutID uuid.UUID) ([]ProgramExercise, error)
 	ListProgramWorkouts(ctx context.Context, programID uuid.UUID) ([]ProgramWorkout, error)
 	ListProgramsByOrg(ctx context.Context, arg ListProgramsByOrgParams) ([]Program, error)
@@ -110,7 +118,10 @@ type Querier interface {
 	UpsertUserAchievement(ctx context.Context, arg UpsertUserAchievementParams) (UserAchievement, error)
 	UpsertUserStats(ctx context.Context, arg UpsertUserStatsParams) (UserStat, error)
 	UpsertUserStreak(ctx context.Context, arg UpsertUserStreakParams) (UserStreak, error)
-	UpsertWorkoutSession(ctx context.Context, arg UpsertWorkoutSessionParams) (WorkoutSession, error)
+	// xmax = 0 distingue una fila recien insertada de una que el upsert
+	// actualizo: es como Postgres deja ver si el ON CONFLICT se disparo. Sin
+	// esto, reenviar el mismo lote vuelve a otorgar XP, racha y logros.
+	UpsertWorkoutSession(ctx context.Context, arg UpsertWorkoutSessionParams) (UpsertWorkoutSessionRow, error)
 }
 
 var _ Querier = (*Queries)(nil)

@@ -71,11 +71,19 @@ func (f *fakePrograms) GetProgressionRuleByID(context.Context, uuid.UUID) (domai
 type fakeSessions struct {
 	domain.SessionRepository
 	nextSetLogID int64
+	// alreadySynced simula un reenvio: el upsert actualiza la fila en vez de
+	// insertarla, asi que no debe volver a premiar.
+	alreadySynced bool
 }
 
 func (f *fakeSessions) UpsertWorkoutSession(_ context.Context, s domain.WorkoutSession) (domain.WorkoutSession, error) {
 	s.ID = uuid.New()
+	s.Inserted = !f.alreadySynced
 	return s, nil
+}
+
+func (f *fakeSessions) ListPersonalRecordsForExercise(context.Context, uuid.UUID, uuid.UUID) ([]domain.PersonalRecord, error) {
+	return nil, nil
 }
 
 func (f *fakeSessions) UpsertSessionExercise(_ context.Context, e domain.SessionExercise) (domain.SessionExercise, error) {
@@ -99,6 +107,16 @@ func (f *fakeSessions) UpsertPersonalRecord(_ context.Context, p domain.Personal
 
 type fakeGamification struct {
 	domain.GamificationRepository
+	xpEvents []domain.XPEvent
+	streaks  []domain.UserStreak
+}
+
+func (f *fakeGamification) GetUserStatsForUpdate(ctx context.Context, userID uuid.UUID) (domain.UserStat, error) {
+	return f.GetUserStats(ctx, userID)
+}
+
+func (f *fakeGamification) GetUserStreakForUpdate(ctx context.Context, userID uuid.UUID, kind string) (domain.UserStreak, error) {
+	return f.GetUserStreak(ctx, userID, kind)
 }
 
 func (f *fakeGamification) GetUserStats(context.Context, uuid.UUID) (domain.UserStat, error) {
@@ -117,7 +135,10 @@ func (f *fakeGamification) UpsertUserStreak(_ context.Context, s domain.UserStre
 	return s, nil
 }
 
-func (f *fakeGamification) CreateXPEvent(context.Context, domain.XPEvent) error { return nil }
+func (f *fakeGamification) CreateXPEvent(_ context.Context, e domain.XPEvent) error {
+	f.xpEvents = append(f.xpEvents, e)
+	return nil
+}
 
 func (f *fakeGamification) ListAchievements(context.Context) ([]domain.Achievement, error) {
 	return nil, nil
@@ -280,6 +301,60 @@ func TestSyncSessionsSinProximaOcurrenciaNoEscribeNada(t *testing.T) {
 	}
 	if len(f.assignments.completedWorkouts) != 1 {
 		t.Fatal("el dia entrenado igual deberia quedar completado")
+	}
+}
+
+// Reenviar el mismo lote es lo normal en offline-first: timeout de red tras
+// un commit exitoso, doble tap, resync al reabrir la app. Las filas son
+// idempotentes por client_local_id; las recompensas tambien tienen que serlo.
+func TestSyncSessionsNoRepiteRecompensasEnUnReenvio(t *testing.T) {
+	exerciseID := uuid.New()
+	trained := domain.AssignedExercise{ID: uuid.New(), ExerciseID: exerciseID}
+	f := newSyncFixture(t, domain.ProgressionRule{}, trained, domain.AssignedExercise{})
+
+	gam := &fakeGamification{}
+	sessions := &fakeSessions{alreadySynced: true} // el upsert actualiza, no inserta
+	repos := domain.TxRepos{Assignments: f.assignments, Sessions: sessions, Gamification: gam}
+	svc := NewSyncService(&fakeUoW{repos: repos}, domain.NewGamificationService(), f.assignments, &fakePrograms{})
+
+	res, err := svc.SyncSessions(context.Background(), uuid.New(), nil,
+		[]SyncSessionInput{completedSession(f.workoutID, exerciseID, []int{10, 10, 10}, 60)})
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+
+	for _, e := range gam.xpEvents {
+		if e.Source == domain.XpSourceSession {
+			t.Fatal("un reenvio no deberia volver a otorgar XP de sesion")
+		}
+	}
+	if len(res.UnlockedAchievements) != 0 {
+		t.Fatalf("un reenvio no deberia desbloquear logros, fueron %d", len(res.UnlockedAchievements))
+	}
+}
+
+func TestSyncSessionsPremiaUnaSesionNueva(t *testing.T) {
+	exerciseID := uuid.New()
+	trained := domain.AssignedExercise{ID: uuid.New(), ExerciseID: exerciseID}
+	f := newSyncFixture(t, domain.ProgressionRule{}, trained, domain.AssignedExercise{})
+
+	gam := &fakeGamification{}
+	repos := domain.TxRepos{Assignments: f.assignments, Sessions: &fakeSessions{}, Gamification: gam}
+	svc := NewSyncService(&fakeUoW{repos: repos}, domain.NewGamificationService(), f.assignments, &fakePrograms{})
+
+	if _, err := svc.SyncSessions(context.Background(), uuid.New(), nil,
+		[]SyncSessionInput{completedSession(f.workoutID, exerciseID, []int{10, 10, 10}, 60)}); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+
+	var sessionXP int32
+	for _, e := range gam.xpEvents {
+		if e.Source == domain.XpSourceSession {
+			sessionXP += e.Points
+		}
+	}
+	if sessionXP != domain.XPPerSession {
+		t.Fatalf("una sesion nueva deberia otorgar %d XP, fueron %d", domain.XPPerSession, sessionXP)
 	}
 }
 

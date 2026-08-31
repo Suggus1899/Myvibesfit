@@ -82,6 +82,27 @@ func (q *Queries) GetUserStats(ctx context.Context, userID uuid.UUID) (UserStat,
 	return i, err
 }
 
+const getUserStatsForUpdate = `-- name: GetUserStatsForUpdate :one
+SELECT user_id, total_xp, level, total_sessions, total_volume_kg, updated_at FROM user_stats WHERE user_id = $1 FOR UPDATE
+`
+
+// Variante con lock de fila para el read-modify-write de ApplyStatsDelta.
+// La version sin lock se usa en las lecturas de solo lectura (/me/stats),
+// que no deberian bloquear a nadie.
+func (q *Queries) GetUserStatsForUpdate(ctx context.Context, userID uuid.UUID) (UserStat, error) {
+	row := q.db.QueryRow(ctx, getUserStatsForUpdate, userID)
+	var i UserStat
+	err := row.Scan(
+		&i.UserID,
+		&i.TotalXp,
+		&i.Level,
+		&i.TotalSessions,
+		&i.TotalVolumeKg,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getUserStreak = `-- name: GetUserStreak :one
 SELECT user_id, kind, current_count, longest_count, last_active_on, freezes_left FROM user_streak WHERE user_id = $1 AND kind = $2
 `
@@ -93,6 +114,29 @@ type GetUserStreakParams struct {
 
 func (q *Queries) GetUserStreak(ctx context.Context, arg GetUserStreakParams) (UserStreak, error) {
 	row := q.db.QueryRow(ctx, getUserStreak, arg.UserID, arg.Kind)
+	var i UserStreak
+	err := row.Scan(
+		&i.UserID,
+		&i.Kind,
+		&i.CurrentCount,
+		&i.LongestCount,
+		&i.LastActiveOn,
+		&i.FreezesLeft,
+	)
+	return i, err
+}
+
+const getUserStreakForUpdate = `-- name: GetUserStreakForUpdate :one
+SELECT user_id, kind, current_count, longest_count, last_active_on, freezes_left FROM user_streak WHERE user_id = $1 AND kind = $2 FOR UPDATE
+`
+
+type GetUserStreakForUpdateParams struct {
+	UserID uuid.UUID  `json:"user_id"`
+	Kind   StreakKind `json:"kind"`
+}
+
+func (q *Queries) GetUserStreakForUpdate(ctx context.Context, arg GetUserStreakForUpdateParams) (UserStreak, error) {
+	row := q.db.QueryRow(ctx, getUserStreakForUpdate, arg.UserID, arg.Kind)
 	var i UserStreak
 	err := row.Scan(
 		&i.UserID,

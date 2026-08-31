@@ -90,6 +90,13 @@ type GamificationRepository interface {
 	GetUserStats(ctx context.Context, userID uuid.UUID) (UserStat, error)
 	UpsertUserStats(ctx context.Context, s UserStat) (UserStat, error)
 	GetUserStreak(ctx context.Context, userID uuid.UUID, kind string) (UserStreak, error)
+
+	// Las variantes ForUpdate toman lock de fila: son para el
+	// read-modify-write de ApplyStatsDelta/BumpStreak dentro de una
+	// transaccion. Sin el lock, dos syncs concurrentes del mismo usuario
+	// (dos dispositivos, un retry solapado) pierden uno de los dos deltas.
+	GetUserStatsForUpdate(ctx context.Context, userID uuid.UUID) (UserStat, error)
+	GetUserStreakForUpdate(ctx context.Context, userID uuid.UUID, kind string) (UserStreak, error)
 	UpsertUserStreak(ctx context.Context, s UserStreak) (UserStreak, error)
 	ListUserStreaks(ctx context.Context, userID uuid.UUID) ([]UserStreak, error)
 	CreateXPEvent(ctx context.Context, e XPEvent) error
@@ -120,7 +127,7 @@ type StatsDelta struct {
 // parcial para este patron de upsert, asi que se relee y reescribe
 // completo).
 func (s *GamificationService) ApplyStatsDelta(ctx context.Context, repo GamificationRepository, userID uuid.UUID, d StatsDelta) (UserStat, error) {
-	current, err := repo.GetUserStats(ctx, userID)
+	current, err := repo.GetUserStatsForUpdate(ctx, userID)
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return UserStat{}, err
 	}
@@ -146,7 +153,7 @@ func (s *GamificationService) RecordXPEvent(ctx context.Context, repo Gamificati
 // BumpStreak avanza la racha si activeDate es el dia siguiente a la ultima
 // actividad, la reinicia si hay un salto, y no hace nada si ya se conto hoy.
 func (s *GamificationService) BumpStreak(ctx context.Context, repo GamificationRepository, userID uuid.UUID, kind string, activeDate time.Time) (UserStreak, error) {
-	current, err := repo.GetUserStreak(ctx, userID, kind)
+	current, err := repo.GetUserStreakForUpdate(ctx, userID, kind)
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return UserStreak{}, err
 	}

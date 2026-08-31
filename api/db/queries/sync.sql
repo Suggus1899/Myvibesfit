@@ -9,7 +9,10 @@ ON CONFLICT (user_id, client_local_id) DO UPDATE SET
   status = EXCLUDED.status, ended_at = EXCLUDED.ended_at, duration_seconds = EXCLUDED.duration_seconds,
   total_volume_kg = EXCLUDED.total_volume_kg, perceived_effort = EXCLUDED.perceived_effort,
   mood = EXCLUDED.mood, notes = EXCLUDED.notes, synced_at = now()
-RETURNING *;
+-- xmax = 0 distingue una fila recien insertada de una que el upsert
+-- actualizo: es como Postgres deja ver si el ON CONFLICT se disparo. Sin
+-- esto, reenviar el mismo lote vuelve a otorgar XP, racha y logros.
+RETURNING *, (xmax = 0) AS inserted;
 
 -- name: UpsertSessionExercise :one
 INSERT INTO session_exercise (session_id, exercise_id, assigned_exercise_id, order_index, superset_group, note)
@@ -46,3 +49,8 @@ RETURNING *;
 -- name: CountCompletedSessionsOnDate :one
 SELECT count(*) FROM workout_session
 WHERE user_id = $1 AND status = 'completed' AND started_at::date = $2::date;
+
+-- name: ListPersonalRecordsForExercise :many
+-- Los 4 tipos de record de un ejercicio en una sola ida a la base: antes se
+-- consultaba uno por uno por cada serie de trabajo.
+SELECT * FROM personal_record WHERE user_id = $1 AND exercise_id = $2;

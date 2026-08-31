@@ -40,6 +40,28 @@ func (r *GamificationRepository) UpsertUserStats(ctx context.Context, s domain.U
 	return toDomainUserStat(row), nil
 }
 
+func (r *GamificationRepository) GetUserStatsForUpdate(ctx context.Context, userID uuid.UUID) (domain.UserStat, error) {
+	row, err := r.q.GetUserStatsForUpdate(ctx, userID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.UserStat{}, domain.ErrNotFound
+		}
+		return domain.UserStat{}, err
+	}
+	return toDomainUserStat(row), nil
+}
+
+func (r *GamificationRepository) GetUserStreakForUpdate(ctx context.Context, userID uuid.UUID, kind string) (domain.UserStreak, error) {
+	row, err := r.q.GetUserStreakForUpdate(ctx, db.GetUserStreakForUpdateParams{UserID: userID, Kind: db.StreakKind(kind)})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.UserStreak{}, domain.ErrNotFound
+		}
+		return domain.UserStreak{}, err
+	}
+	return toDomainUserStreak(row), nil
+}
+
 func (r *GamificationRepository) GetUserStreak(ctx context.Context, userID uuid.UUID, kind string) (domain.UserStreak, error) {
 	row, err := r.q.GetUserStreak(ctx, db.GetUserStreakParams{UserID: userID, Kind: db.StreakKind(kind)})
 	if err != nil {

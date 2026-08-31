@@ -37,6 +37,15 @@ func (f *fakeGamificationRepo) GetUserStats(_ context.Context, userID uuid.UUID)
 	return s, nil
 }
 
+// En memoria no hay locks: ForUpdate se comporta igual que la lectura suelta.
+func (f *fakeGamificationRepo) GetUserStatsForUpdate(ctx context.Context, userID uuid.UUID) (UserStat, error) {
+	return f.GetUserStats(ctx, userID)
+}
+
+func (f *fakeGamificationRepo) GetUserStreakForUpdate(ctx context.Context, userID uuid.UUID, kind string) (UserStreak, error) {
+	return f.GetUserStreak(ctx, userID, kind)
+}
+
 func (f *fakeGamificationRepo) UpsertUserStats(_ context.Context, s UserStat) (UserStat, error) {
 	f.stats[s.UserID] = s
 	return s, nil

@@ -51,6 +51,11 @@ type WorkoutSession struct {
 	Notes             string
 	SyncedAt          time.Time
 	CreatedAt         time.Time
+
+	// Inserted distingue una sesion nueva de un reenvio del mismo lote. Las
+	// filas son idempotentes por client_local_id, pero XP, racha y logros no:
+	// sin esto, reintentar el sync vuelve a premiar la misma sesion.
+	Inserted bool
 }
 
 type SessionExercise struct {
@@ -99,6 +104,10 @@ type SessionRepository interface {
 	UpsertSessionExercise(ctx context.Context, e SessionExercise) (SessionExercise, error)
 	UpsertSetLog(ctx context.Context, s SetLog) (SetLog, error)
 	GetPersonalRecord(ctx context.Context, userID, exerciseID uuid.UUID, recordType RecordType) (PersonalRecord, error)
+
+	// ListPersonalRecordsForExercise trae los 4 tipos de una sola vez: antes
+	// se consultaban de a uno por cada serie de trabajo de cada sesion.
+	ListPersonalRecordsForExercise(ctx context.Context, userID, exerciseID uuid.UUID) ([]PersonalRecord, error)
 	UpsertPersonalRecord(ctx context.Context, r PersonalRecord) (PersonalRecord, error)
 	CountCompletedSessionsOnDate(ctx context.Context, userID uuid.UUID, date time.Time) (int64, error)
 }

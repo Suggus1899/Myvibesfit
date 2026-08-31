@@ -29,7 +29,28 @@ func (r *SessionRepository) UpsertWorkoutSession(ctx context.Context, s domain.W
 	if err != nil {
 		return domain.WorkoutSession{}, err
 	}
-	return toDomainWorkoutSession(row), nil
+	// El upsert devuelve una fila propia (trae la bandera inserted), no
+	// db.WorkoutSession, asi que se mapea aparte.
+	return domain.WorkoutSession{
+		ID: row.ID, ClientLocalID: row.ClientLocalID, UserID: row.UserID, OrgID: pgUUIDToPtr(row.OrgID),
+		AssignedWorkoutID: pgUUIDToPtr(row.AssignedWorkoutID), Name: row.Name, Status: domain.SessionStatus(row.Status),
+		StartedAt: row.StartedAt, EndedAt: row.EndedAt, DurationSeconds: pgInt4ToPtr(row.DurationSeconds),
+		TotalVolumeKg: row.TotalVolumeKg, PerceivedEffort: pgInt2ToPtr(row.PerceivedEffort), Mood: pgInt2ToPtr(row.Mood),
+		Notes: pgTextToString(row.Notes), SyncedAt: row.SyncedAt, CreatedAt: row.CreatedAt,
+		Inserted: row.Inserted,
+	}, nil
+}
+
+func (r *SessionRepository) ListPersonalRecordsForExercise(ctx context.Context, userID, exerciseID uuid.UUID) ([]domain.PersonalRecord, error) {
+	rows, err := r.q.ListPersonalRecordsForExercise(ctx, db.ListPersonalRecordsForExerciseParams{UserID: userID, ExerciseID: exerciseID})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.PersonalRecord, len(rows))
+	for i, row := range rows {
+		out[i] = toDomainPersonalRecord(row)
+	}
+	return out, nil
 }
 
 func (r *SessionRepository) UpsertSessionExercise(ctx context.Context, e domain.SessionExercise) (domain.SessionExercise, error) {

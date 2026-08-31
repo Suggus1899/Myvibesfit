@@ -145,7 +145,10 @@ func (s *SyncService) SyncSessions(ctx context.Context, userID uuid.UUID, orgID 
 				}
 			}
 
-			if sess.Status == string(domain.SessionStatusCompleted) {
+			// Solo las sesiones recien insertadas premian. Un reenvio del
+			// mismo lote (timeout de red, doble tap, resync) actualiza las
+			// filas pero no vuelve a otorgar XP, racha ni logros.
+			if sess.Status == string(domain.SessionStatusCompleted) && row.Inserted {
 				completedCount++
 				completedVolume += volume
 				if sess.StartedAt.After(lastActiveDate) {
@@ -392,19 +395,31 @@ func derefInt(v *int) int {
 }
 
 func (s *SyncService) checkPersonalRecords(ctx context.Context, repos domain.TxRepos, userID, exerciseID uuid.UUID, setLogID int64, weightKg float64, reps int, performedAt time.Time) (bool, error) {
-	beat := false
+	// personal_record.value es numeric(8,2): el candidato se redondea a la
+	// misma escala antes de comparar. Sin esto, un 1RM estimado de 93.3333
+	// se guarda como 93.33 y en el proximo reenvio del lote se "supera" a si
+	// mismo, otorgando XP de record cada vez.
 	candidates := map[domain.RecordType]float64{
-		domain.RecordTypeMaxWeight:    weightKg,
+		domain.RecordTypeMaxWeight:    roundToNearest(weightKg, 0.01),
 		domain.RecordTypeMaxReps:      float64(reps),
-		domain.RecordTypeEstimated1RM: weightKg * (1 + float64(reps)/30.0),
-		domain.RecordTypeMaxVolumeSet: weightKg * float64(reps),
+		domain.RecordTypeEstimated1RM: roundToNearest(weightKg*(1+float64(reps)/30.0), 0.01),
+		domain.RecordTypeMaxVolumeSet: roundToNearest(weightKg*float64(reps), 0.01),
 	}
+
+	// Una sola lectura para los 4 tipos: antes eran 4 idas a la base por cada
+	// serie de trabajo de cada sesion del lote.
+	existing, err := repos.Sessions.ListPersonalRecordsForExercise(ctx, userID, exerciseID)
+	if err != nil {
+		return false, err
+	}
+	current := make(map[domain.RecordType]float64, len(existing))
+	for _, r := range existing {
+		current[r.Type] = r.Value
+	}
+
+	beat := false
 	for recordType, value := range candidates {
-		current, err := repos.Sessions.GetPersonalRecord(ctx, userID, exerciseID, recordType)
-		if err != nil && !errors.Is(err, domain.ErrNotFound) {
-			return false, err
-		}
-		if err == nil && current.Value >= value {
+		if best, ok := current[recordType]; ok && best >= value {
 			continue
 		}
 		logID := setLogID

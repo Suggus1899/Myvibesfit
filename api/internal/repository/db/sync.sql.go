@@ -55,6 +55,45 @@ func (q *Queries) GetPersonalRecord(ctx context.Context, arg GetPersonalRecordPa
 	return i, err
 }
 
+const listPersonalRecordsForExercise = `-- name: ListPersonalRecordsForExercise :many
+SELECT id, user_id, exercise_id, type, value, set_log_id, achieved_at FROM personal_record WHERE user_id = $1 AND exercise_id = $2
+`
+
+type ListPersonalRecordsForExerciseParams struct {
+	UserID     uuid.UUID `json:"user_id"`
+	ExerciseID uuid.UUID `json:"exercise_id"`
+}
+
+// Los 4 tipos de record de un ejercicio en una sola ida a la base: antes se
+// consultaba uno por uno por cada serie de trabajo.
+func (q *Queries) ListPersonalRecordsForExercise(ctx context.Context, arg ListPersonalRecordsForExerciseParams) ([]PersonalRecord, error) {
+	rows, err := q.db.Query(ctx, listPersonalRecordsForExercise, arg.UserID, arg.ExerciseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PersonalRecord{}
+	for rows.Next() {
+		var i PersonalRecord
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.ExerciseID,
+			&i.Type,
+			&i.Value,
+			&i.SetLogID,
+			&i.AchievedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const upsertPersonalRecord = `-- name: UpsertPersonalRecord :one
 INSERT INTO personal_record (user_id, exercise_id, type, value, set_log_id, achieved_at)
 VALUES ($1, $2, $3, $4, $5, $6)
@@ -218,7 +257,7 @@ ON CONFLICT (user_id, client_local_id) DO UPDATE SET
   status = EXCLUDED.status, ended_at = EXCLUDED.ended_at, duration_seconds = EXCLUDED.duration_seconds,
   total_volume_kg = EXCLUDED.total_volume_kg, perceived_effort = EXCLUDED.perceived_effort,
   mood = EXCLUDED.mood, notes = EXCLUDED.notes, synced_at = now()
-RETURNING id, client_local_id, user_id, org_id, assigned_workout_id, name, status, started_at, ended_at, duration_seconds, total_volume_kg, perceived_effort, mood, notes, synced_at, created_at
+RETURNING id, client_local_id, user_id, org_id, assigned_workout_id, name, status, started_at, ended_at, duration_seconds, total_volume_kg, perceived_effort, mood, notes, synced_at, created_at, (xmax = 0) AS inserted
 `
 
 type UpsertWorkoutSessionParams struct {
@@ -237,7 +276,30 @@ type UpsertWorkoutSessionParams struct {
 	Notes             pgtype.Text   `json:"notes"`
 }
 
-func (q *Queries) UpsertWorkoutSession(ctx context.Context, arg UpsertWorkoutSessionParams) (WorkoutSession, error) {
+type UpsertWorkoutSessionRow struct {
+	ID                uuid.UUID     `json:"id"`
+	ClientLocalID     uuid.UUID     `json:"client_local_id"`
+	UserID            uuid.UUID     `json:"user_id"`
+	OrgID             pgtype.UUID   `json:"org_id"`
+	AssignedWorkoutID pgtype.UUID   `json:"assigned_workout_id"`
+	Name              string        `json:"name"`
+	Status            SessionStatus `json:"status"`
+	StartedAt         time.Time     `json:"started_at"`
+	EndedAt           *time.Time    `json:"ended_at"`
+	DurationSeconds   pgtype.Int4   `json:"duration_seconds"`
+	TotalVolumeKg     float64       `json:"total_volume_kg"`
+	PerceivedEffort   pgtype.Int2   `json:"perceived_effort"`
+	Mood              pgtype.Int2   `json:"mood"`
+	Notes             pgtype.Text   `json:"notes"`
+	SyncedAt          time.Time     `json:"synced_at"`
+	CreatedAt         time.Time     `json:"created_at"`
+	Inserted          bool          `json:"inserted"`
+}
+
+// xmax = 0 distingue una fila recien insertada de una que el upsert
+// actualizo: es como Postgres deja ver si el ON CONFLICT se disparo. Sin
+// esto, reenviar el mismo lote vuelve a otorgar XP, racha y logros.
+func (q *Queries) UpsertWorkoutSession(ctx context.Context, arg UpsertWorkoutSessionParams) (UpsertWorkoutSessionRow, error) {
 	row := q.db.QueryRow(ctx, upsertWorkoutSession,
 		arg.ClientLocalID,
 		arg.UserID,
@@ -253,7 +315,7 @@ func (q *Queries) UpsertWorkoutSession(ctx context.Context, arg UpsertWorkoutSes
 		arg.Mood,
 		arg.Notes,
 	)
-	var i WorkoutSession
+	var i UpsertWorkoutSessionRow
 	err := row.Scan(
 		&i.ID,
 		&i.ClientLocalID,
@@ -271,6 +333,7 @@ func (q *Queries) UpsertWorkoutSession(ctx context.Context, arg UpsertWorkoutSes
 		&i.Notes,
 		&i.SyncedAt,
 		&i.CreatedAt,
+		&i.Inserted,
 	)
 	return i, err
 }

@@ -47,3 +47,12 @@ FROM user_achievement ua
 JOIN achievement a ON a.id = ua.achievement_id
 WHERE ua.user_id = $1
 ORDER BY a.tier, a.name;
+
+-- name: GetUserStatsForUpdate :one
+-- Variante con lock de fila para el read-modify-write de ApplyStatsDelta.
+-- La version sin lock se usa en las lecturas de solo lectura (/me/stats),
+-- que no deberian bloquear a nadie.
+SELECT * FROM user_stats WHERE user_id = $1 FOR UPDATE;
+
+-- name: GetUserStreakForUpdate :one
+SELECT * FROM user_streak WHERE user_id = $1 AND kind = $2 FOR UPDATE;
