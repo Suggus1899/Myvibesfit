@@ -83,7 +83,20 @@ type AISuggestionRepository interface {
 	GetByID(ctx context.Context, id, orgID uuid.UUID) (AISuggestion, error)
 	ListPendingForCoach(ctx context.Context, coachID, orgID uuid.UUID) ([]PendingSuggestion, error)
 	Review(ctx context.Context, id, orgID uuid.UUID, status SuggestionStatus, reviewedBy uuid.UUID) (AISuggestion, error)
+
+	// MarkApplied sella que la sugerencia efectivamente muto el plan.
+	// Aprobar y aplicar tienen que ser atomicos: marcarla aprobada sin
+	// aplicarla le hace creer al coach que el ajuste esta puesto.
+	MarkApplied(ctx context.Context, id, orgID uuid.UUID) error
 }
+
+// AppliableKinds son los unicos kinds que mutan assigned_exercise al
+// aprobarse, porque son los que traen un delta numerico ya validado por
+// Suggestion.Validate. exercise_swap viaja con un nombre de ejercicio en
+// texto libre sin id resoluble contra el catalogo — resolverlo es una
+// decision de producto pendiente, no un bug. deload, rest_day y habit_nudge
+// no proponen un target: sugieren saltear o descansar.
+var AppliableKinds = map[string]bool{"load_adjust": true, "volume_adjust": true}
 
 // --- lo que se manda a/recibe de Claude (movido de internal/ai) ---
 

@@ -124,6 +124,10 @@ func (r *AISuggestionRepository) Review(ctx context.Context, id, orgID uuid.UUID
 	return toDomainAISuggestion(row), nil
 }
 
+func (r *AISuggestionRepository) MarkApplied(ctx context.Context, id, orgID uuid.UUID) error {
+	return r.q.MarkAISuggestionApplied(ctx, db.MarkAISuggestionAppliedParams{ID: id, OrgID: orgID})
+}
+
 func toDomainAISuggestion(s db.AiSuggestion) domain.AISuggestion {
 	return domain.AISuggestion{
 		ID: s.ID, OrgID: s.OrgID, ClientUserID: s.ClientUserID, CoachUserID: pgUUIDToPtr(s.CoachUserID),

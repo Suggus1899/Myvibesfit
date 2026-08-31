@@ -29,6 +29,7 @@ func (u *UnitOfWork) Execute(ctx context.Context, fn func(domain.TxRepos) error)
 		Gamification: NewGamificationRepository(qtx),
 		Habits:       NewHabitRepository(qtx),
 		Coaches:      NewCoachRepository(qtx),
+		Suggestions:  NewAISuggestionRepository(qtx),
 	}
 	if err := fn(repos); err != nil {
 		return err

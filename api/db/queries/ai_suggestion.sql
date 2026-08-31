@@ -51,3 +51,6 @@ UPDATE ai_suggestion
 SET status = $3, reviewed_by = $4, reviewed_at = now()
 WHERE id = $1 AND org_id = $2 AND status = 'pending'
 RETURNING *;
+
+-- name: MarkAISuggestionApplied :exec
+UPDATE ai_suggestion SET applied_at = now() WHERE id = $1 AND org_id = $2;

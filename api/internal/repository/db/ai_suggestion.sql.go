@@ -328,6 +328,20 @@ func (q *Queries) ListRecentWorkingSets(ctx context.Context, arg ListRecentWorki
 	return items, nil
 }
 
+const markAISuggestionApplied = `-- name: MarkAISuggestionApplied :exec
+UPDATE ai_suggestion SET applied_at = now() WHERE id = $1 AND org_id = $2
+`
+
+type MarkAISuggestionAppliedParams struct {
+	ID    uuid.UUID `json:"id"`
+	OrgID uuid.UUID `json:"org_id"`
+}
+
+func (q *Queries) MarkAISuggestionApplied(ctx context.Context, arg MarkAISuggestionAppliedParams) error {
+	_, err := q.db.Exec(ctx, markAISuggestionApplied, arg.ID, arg.OrgID)
+	return err
+}
+
 const reviewAISuggestion = `-- name: ReviewAISuggestion :one
 UPDATE ai_suggestion
 SET status = $3, reviewed_by = $4, reviewed_at = now()

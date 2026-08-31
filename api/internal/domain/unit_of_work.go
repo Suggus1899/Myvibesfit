@@ -11,6 +11,7 @@ type TxRepos struct {
 	Gamification GamificationRepository
 	Habits       HabitRepository
 	Coaches      CoachRepository
+	Suggestions  AISuggestionRepository
 }
 
 type UnitOfWork interface {

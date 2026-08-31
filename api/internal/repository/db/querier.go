@@ -87,6 +87,7 @@ type Querier interface {
 	ListSetLogsForExercise(ctx context.Context, arg ListSetLogsForExerciseParams) ([]SetLog, error)
 	ListUserAchievements(ctx context.Context, userID uuid.UUID) ([]ListUserAchievementsRow, error)
 	ListUserStreaks(ctx context.Context, userID uuid.UUID) ([]UserStreak, error)
+	MarkAISuggestionApplied(ctx context.Context, arg MarkAISuggestionAppliedParams) error
 	MarkAssignedWorkoutCompleted(ctx context.Context, id uuid.UUID) error
 	ReviewAISuggestion(ctx context.Context, arg ReviewAISuggestionParams) (AiSuggestion, error)
 	RevokeRefreshTokenByHash(ctx context.Context, tokenHash string) error

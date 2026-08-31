@@ -72,7 +72,7 @@ func main() {
 	progressSvc := service.NewProgressService(progressRepo)
 	habitSvc := service.NewHabitService(habitRepo, uow, gamificationSvc)
 	coachSvc := service.NewCoachService(coachRepo)
-	aiSuggestionSvc := service.NewAISuggestionService(aiSuggestionRepo, auditLogger)
+	aiSuggestionSvc := service.NewAISuggestionService(aiSuggestionRepo, uow, auditLogger)
 	profileSvc := service.NewProfileService(profileRepo)
 
 	router := apphttp.NewRouter(apphttp.Handlers{
