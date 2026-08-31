@@ -147,3 +147,19 @@ noche.
 - [ ] **No solapamiento (O2):** dos lanzamientos con `flock -n`; el segundo no arranca.
 - [ ] **Subcomando ausente** sigue ejecutando `suggestions`.
 - [ ] `cd api && go vet ./... && go test ./... && go build ./...`
+
+---
+
+## Impact analysis previo (Definition of Ready, Fase 1)
+
+> **Estado: PENDIENTE**, por la misma indisponibilidad de herramienta del 2026-08-31 descrita en
+> SDD-002. Que este documento *proponga* gates de GitNexus y no haya podido ejecutarlos es
+> justamente por qué §5 de la metodología ahora exige el fallback CLI.
+
+| Símbolo | Por qué | Riesgo esperado |
+|---|---|---|
+| `main` (`cmd/worker`) | Pasa a despachar subcomandos | Bajo: binario sin importadores |
+| `SuggestionWorkerService` | Se reutiliza desde `runSuggestions` | Bajo: un solo caller hoy |
+| `GamificationRepository` | Gana la lectura de rachas en riesgo | **A verificar**: es un port con varios implementadores y entra en `TxRepos` |
+
+El tercero es el único que puede sorprender, y es el que hay que mirar primero.

@@ -11,12 +11,16 @@ supervisadas por el coach.
 - [docs/DESIGN.md](./docs/DESIGN.md) — tokens de color, tipografía, componentes,
   mapeo a Flutter `ThemeExtension`
 - [docs/PHASES.md](./docs/PHASES.md) — plan de desarrollo por fases
+- [docs/SDD_METHODOLOGY.md](./docs/SDD_METHODOLOGY.md) — **metodología SDD actualizada** (5 fases con Definition of Ready/Done, gates obligatorios GitNexus, cobertura de tests, tooling)
+- [docs/sdd/README.md](./docs/sdd/README.md) — catálogo de plantillas + SDDs activos (SDD-001/002/003)
 
 ## Estado actual
 
 Fases 0-10 de [PHASES.md](./docs/PHASES.md) construidas, **más el cierre de
 la cadena de producto** (ver abajo). Lo que falta para producción real
 requiere un VPS.
+
+**Metodología SDD actualizada (2026-08-31):** Se añadieron Definition of Ready/Done por fase, gates obligatorios `gitnexus impact()` + `detect_changes()`, cobertura mínima de tests (handlers, services, Flutter), y tooling obligatorio (GitNexus, Context7, Skills). Ver [docs/SDD_METHODOLOGY.md](./docs/SDD_METHODOLOGY.md) y [docs/sdd/README.md](./docs/sdd/README.md).
 
 ### La cadena de producto ya está cerrada
 
@@ -180,9 +184,12 @@ Tailwind v4 + shadcn/ui, `pnpm lint` y `pnpm build` limpios:
   reenvío), `NotificationService` y el middleware de auth/RBAC
   (`internal/transport/http/middleware`, 21 casos: firma forjada, token
   expirado, JWT sin `org_id`, `RequireRole` con lista vacía).
-- **Sin cubrir todavía**: `AssignmentService.Assign` y los **handlers** HTTP.
-- **Flutter**: solo `AppColors`. Faltan router/redirects, `AuthController`,
-  cola de sync y `WorkoutStore`.
+- **Sin cubrir todavía (requeridos por SDD actualizado):** `AssignmentService.Assign`, **handlers HTTP** (1 test/handler: happy path + 400 + 401 + 403), Flutter: router/redirects, `AuthController`, cola de sync, `WorkoutStore`.
+- **Cobertura objetivo (SDD §2 Fase 3)** — lo marcado como gate bloquea; el resto es meta:
+  - Dominio puro (progresión, gamificación, validación IA): 100% funciones públicas
+  - Services: caso feliz + 1 error + 1 edge case por método público
+  - Handlers HTTP: **objetivo, no gate** — hoy hay cero; el gate real es el middleware
+  - Flutter: router/redirects, `AuthController`, cola de sync, `WorkoutStore`
 
 ## Deuda conocida (diagnosticada, no arreglada)
 

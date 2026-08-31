@@ -2,7 +2,7 @@
 > **Tipo:** Feature Full-Stack (Backend + Móvil)
 > **Fecha:** 2026-08-31
 > **Autor / Responsable:** Gustavo Colina
-> **Estado:** `Approved` — backend implementado y verificado; pendientes el adapter FCM y la integración Flutter (ver §9)
+> **Estado:** `Approved` — backend completo y verificado en vivo, incluido el adapter FCM. Pendientes: la integración Flutter y la entrega real en dispositivo (ver §9)
 
 ---
 

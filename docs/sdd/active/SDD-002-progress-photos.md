@@ -196,3 +196,22 @@ controles de subida ni de borrado: la invariante 3 tiene que notarse también en
 `progress_photo` no tiene `org_id`, igual que `device_token`. La foto es del usuario, no del
 gimnasio: si cambia de gym, sus fotos lo siguen y el coach anterior deja de verlas porque
 `IsClientOf` deja de ser cierto. Es el comportamiento correcto y sale gratis del modelo.
+
+---
+
+## Impact analysis previo (Definition of Ready, Fase 1)
+
+> **Estado: PENDIENTE.** No se pudo ejecutar el 2026-08-31: el MCP de GitNexus devolvió
+> `CONNECT_TIMEOUT` y el runner CLI falló al arrancar (`EBUSY` sobre el binario nativo). No se
+> sustituye por una estimación: un impact analysis inventado es peor que ninguno.
+
+Símbolos a evaluar antes de escribir código, con `--direction upstream`:
+
+| Símbolo | Por qué | Riesgo esperado |
+|---|---|---|
+| `config.Load` / `config.Config` | Se le añaden 4 campos de storage | Bajo: mismo patrón que las de FCM, un solo caller |
+| `NewCoachService` | Gana el listado de fotos compartidas | Bajo por precedente: `NewAssignmentService` dio LOW/exact con un caller |
+| `apphttp.Handlers` | Campo nuevo de handler | Bajo, pero toca el struct que arma `main` |
+
+Si alguno vuelve `HIGH`/`CRITICAL`, se avisa antes de seguir. Si vuelve `UNKNOWN`, se confirma
+con búsqueda textual: `UNKNOWN` no es "sin callers".
