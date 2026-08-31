@@ -97,7 +97,11 @@ export default function CoachDashboard() {
             <TableBody>
               {clients.map((c) => (
                 <TableRow key={c.client_user_id}>
-                  <TableCell className="font-medium">{c.full_name}</TableCell>
+                  <TableCell className="font-medium">
+                    <a href={`/clients/${c.client_user_id}`} className="underline underline-offset-4">
+                      {c.full_name}
+                    </a>
+                  </TableCell>
                   <TableCell>
                     {c.has_assignment ? c.assignment_name : "Sin plan asignado"}
                   </TableCell>

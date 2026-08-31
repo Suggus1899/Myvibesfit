@@ -30,3 +30,10 @@ INSERT INTO coach_client (org_id, coach_user_id, client_user_id)
 VALUES ($1, $2, $3)
 ON CONFLICT (org_id, client_user_id) WHERE ended_at IS NULL
 DO UPDATE SET coach_user_id = EXCLUDED.coach_user_id;
+
+-- name: IsCoachClient :one
+-- El coach solo puede ver a los clientes vinculados a el en esta org.
+SELECT EXISTS (
+  SELECT 1 FROM coach_client
+  WHERE org_id = $1 AND coach_user_id = $2 AND client_user_id = $3 AND ended_at IS NULL
+);

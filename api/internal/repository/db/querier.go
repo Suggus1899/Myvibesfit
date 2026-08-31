@@ -69,6 +69,8 @@ type Querier interface {
 	GetUserStreakForUpdate(ctx context.Context, arg GetUserStreakForUpdateParams) (UserStreak, error)
 	GetWorkoutAssignmentID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error
+	// El coach solo puede ver a los clientes vinculados a el en esta org.
+	IsCoachClient(ctx context.Context, arg IsCoachClientParams) (bool, error)
 	LinkCoachClient(ctx context.Context, arg LinkCoachClientParams) error
 	ListAchievements(ctx context.Context) ([]Achievement, error)
 	ListActiveAssignmentsForWorker(ctx context.Context) ([]ListActiveAssignmentsForWorkerRow, error)

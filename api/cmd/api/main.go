@@ -71,7 +71,7 @@ func main() {
 	syncSvc := service.NewSyncService(uow, gamificationSvc, assignmentRepo, programRepo)
 	progressSvc := service.NewProgressService(progressRepo)
 	habitSvc := service.NewHabitService(habitRepo, uow, gamificationSvc)
-	coachSvc := service.NewCoachService(coachRepo)
+	coachSvc := service.NewCoachService(coachRepo, progressRepo)
 	aiSuggestionSvc := service.NewAISuggestionService(aiSuggestionRepo, uow, auditLogger)
 	profileSvc := service.NewProfileService(profileRepo)
 

@@ -43,4 +43,8 @@ type CoachRepository interface {
 	// un cliente tiene un solo coach activo por org a la vez, y reasignarlo
 	// a otro programa/coach mueve el vinculo, no lo duplica.
 	LinkClient(ctx context.Context, orgID, coachUserID, clientUserID uuid.UUID) error
+
+	// IsClientOf autoriza el acceso al detalle de un cliente: un coach solo
+	// ve a los suyos, no a todos los de la organizacion.
+	IsClientOf(ctx context.Context, orgID, coachUserID, clientUserID uuid.UUID) (bool, error)
 }

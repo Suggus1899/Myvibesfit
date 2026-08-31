@@ -31,6 +31,10 @@ func (r *CoachRepository) ListClients(ctx context.Context, orgID, coachUserID uu
 	return out, nil
 }
 
+func (r *CoachRepository) IsClientOf(ctx context.Context, orgID, coachUserID, clientUserID uuid.UUID) (bool, error) {
+	return r.q.IsCoachClient(ctx, db.IsCoachClientParams{OrgID: orgID, CoachUserID: coachUserID, ClientUserID: clientUserID})
+}
+
 func (r *CoachRepository) LinkClient(ctx context.Context, orgID, coachUserID, clientUserID uuid.UUID) error {
 	return r.q.LinkCoachClient(ctx, db.LinkCoachClientParams{OrgID: orgID, CoachUserID: coachUserID, ClientUserID: clientUserID})
 }

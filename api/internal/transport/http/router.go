@@ -136,6 +136,7 @@ func NewRouter(h Handlers, signer *platform.JWTSigner, corsOrigins []string) htt
 				r.Post("/assignments/{id}/cancel", h.Assignment.Cancel)
 
 				r.Get("/coach/clients", h.Coach.Clients)
+				r.Get("/coach/clients/{id}/progress", h.Coach.ClientProgress)
 
 				r.Get("/coach/suggestions", h.AISuggestion.ListPending)
 				r.Post("/ai-suggestions/{id}/approve", h.AISuggestion.Approve)

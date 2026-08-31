@@ -10,11 +10,26 @@ import (
 )
 
 type CoachService struct {
-	repo domain.CoachRepository
+	repo     domain.CoachRepository
+	progress domain.ProgressRepository
 }
 
-func NewCoachService(repo domain.CoachRepository) *CoachService {
-	return &CoachService{repo: repo}
+func NewCoachService(repo domain.CoachRepository, progress domain.ProgressRepository) *CoachService {
+	return &CoachService{repo: repo, progress: progress}
+}
+
+// ClientProgress devuelve los records de un cliente para la pantalla de
+// detalle. Autoriza primero: un coach solo ve a los clientes vinculados a
+// el, no a todos los de la organizacion.
+func (s *CoachService) ClientProgress(ctx context.Context, orgID, coachUserID, clientUserID uuid.UUID) ([]domain.PersonalRecord, error) {
+	ok, err := s.repo.IsClientOf(ctx, orgID, coachUserID, clientUserID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	return s.progress.ListPersonalRecords(ctx, clientUserID, nil)
 }
 
 type CoachClientOverview struct {

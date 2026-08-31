@@ -181,15 +181,22 @@ Tailwind v4 + shadcn/ui, `pnpm lint` y `pnpm build` limpios:
 Auditorías previas (go-reviewer, architect, database-reviewer) dejaron esto
 documentado — no hace falta volver a auditar, están confirmados:
 
-- **Gamificación no idempotente**: `UpsertWorkoutSession`/`UpsertHabitLog` son
-  idempotentes por `client_local_id`, pero el XP/racha/logros se recalculan en
-  cada reenvío. Un retry de red duplica recompensas (no filas).
-- **Lost update en stats/rachas**: `ApplyStatsDelta`/`BumpStreak` hacen
-  read-modify-write sin `FOR UPDATE` bajo READ COMMITTED.
-- **N+1 en `checkPersonalRecords`**: 4 round-trips por set de tipo `working`.
-- **`TxRepos` en su límite de diseño**: ya son 5 campos y 4 flujos; ningún
-  flujo usa todos. Al quinto flujo o al primero que necesite otro nivel de
-  aislamiento, conviene repartirlo.
+- **`UpsertHabitLog` sigue sin ser idempotente en recompensas.** El sync de
+  sesiones ya se arregló (`UpsertWorkoutSession` devuelve `inserted` vía
+  `xmax = 0` y solo premia las nuevas); el check-in de hábitos todavía otorga
+  XP en cada reenvío. Mismo patrón, falta aplicarlo.
+- **`TxRepos` pasó el umbral**: 6 campos y 5 flujos, ninguno usa todos. La
+  señal para repartirlo ahora es el primer flujo que necesite otro nivel de
+  aislamiento, no el conteo.
+- **`internal/progression/` ya tiene llamador** (`SyncService.progressPlan`);
+  lo que sigue sin usarse es el 1RM real: `OneRepMaxKg` se pasa en cero, así
+  que la estrategia `percentage_1rm` mantiene el peso en vez de calcularlo.
+- **La app no manda `assigned_exercise_id`** en el sync: la progresión cruza
+  por `assigned_workout_id` + `exercise_id`. Si un día del plan repitiera el
+  mismo ejercicio dos veces, ambos compartirían el target calculado.
+- **`exercise_swap` no se aplica al aprobarse** (decisión de producto, no
+  bug): viaja con el nombre del ejercicio en texto libre, sin id resoluble
+  contra el catálogo.
 - **`AISuggestionRepository` mezcla 4 agregados ajenos** (counts de
   assignment/session/habit) porque el port se derivó del archivo sqlc, no de
   los casos de uso.

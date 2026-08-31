@@ -13,6 +13,27 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const isCoachClient = `-- name: IsCoachClient :one
+SELECT EXISTS (
+  SELECT 1 FROM coach_client
+  WHERE org_id = $1 AND coach_user_id = $2 AND client_user_id = $3 AND ended_at IS NULL
+)
+`
+
+type IsCoachClientParams struct {
+	OrgID        uuid.UUID `json:"org_id"`
+	CoachUserID  uuid.UUID `json:"coach_user_id"`
+	ClientUserID uuid.UUID `json:"client_user_id"`
+}
+
+// El coach solo puede ver a los clientes vinculados a el en esta org.
+func (q *Queries) IsCoachClient(ctx context.Context, arg IsCoachClientParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isCoachClient, arg.OrgID, arg.CoachUserID, arg.ClientUserID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const linkCoachClient = `-- name: LinkCoachClient :exec
 INSERT INTO coach_client (org_id, coach_user_id, client_user_id)
 VALUES ($1, $2, $3)
