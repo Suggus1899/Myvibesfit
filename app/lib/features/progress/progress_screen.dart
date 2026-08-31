@@ -7,7 +7,9 @@ import '../../core/network/models.dart';
 import '../../core/providers.dart';
 import '../../core/theme/app_colors.dart';
 
-final recordsProvider = FutureProvider.autoDispose<List<PersonalRecordInfo>>((ref) => ref.watch(apiRepositoryProvider).records());
+final recordsProvider = FutureProvider.autoDispose<List<PersonalRecordInfo>>(
+  (ref) => ref.watch(apiRepositoryProvider).records(),
+);
 final selectedExerciseProvider = StateProvider<String?>((ref) => null);
 final exerciseHistoryProvider = FutureProvider.autoDispose<List<SetLogPoint>>((ref) async {
   final exerciseId = ref.watch(selectedExerciseProvider);
@@ -41,7 +43,12 @@ class ProgressScreen extends ConsumerWidget {
       body: recordsAsync.when(
         data: (records) {
           if (records.isEmpty) {
-            return const Center(child: Padding(padding: EdgeInsets.all(24), child: Text('Todavía no hay records. Completa un entrenamiento primero.')));
+            return const Center(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Text('Todavía no hay records. Completa un entrenamiento primero.'),
+              ),
+            );
           }
           final byExercise = <String, List<PersonalRecordInfo>>{};
           for (final r in records) {
@@ -49,7 +56,9 @@ class ProgressScreen extends ConsumerWidget {
           }
           return ListView(
             padding: const EdgeInsets.all(16),
-            children: byExercise.entries.map((entry) => _ExerciseRecordsCard(exerciseId: entry.key, records: entry.value)).toList(),
+            children: byExercise.entries
+                .map((entry) => _ExerciseRecordsCard(exerciseId: entry.key, records: entry.value))
+                .toList(),
           );
         },
         loading: () => const Center(child: CircularProgressIndicator()),
@@ -89,7 +98,11 @@ class _ExerciseRecordsCard extends ConsumerWidget {
                     child: Text(name, style: Theme.of(context).textTheme.titleLarge),
                   ),
                 ),
-                if (maxWeight != null) Text('${maxWeight.toStringAsFixed(1)} kg', style: TextStyle(color: colors.brand, fontWeight: FontWeight.w800)),
+                if (maxWeight != null)
+                  Text(
+                    '${maxWeight.toStringAsFixed(1)} kg',
+                    style: TextStyle(color: colors.brand, fontWeight: FontWeight.w800),
+                  ),
               ],
             ),
             TextButton(
@@ -124,14 +137,22 @@ class _ExerciseChart extends ConsumerWidget {
           height: 160,
           child: Padding(
             padding: const EdgeInsets.only(top: 12),
-            child: LineChart(LineChartData(
-              gridData: const FlGridData(show: false),
-              titlesData: const FlTitlesData(show: false),
-              borderData: FlBorderData(show: false),
-              lineBarsData: [
-                LineChartBarData(spots: spots, isCurved: true, color: colors.brand, barWidth: 3, dotData: const FlDotData(show: false)),
-              ],
-            )),
+            child: LineChart(
+              LineChartData(
+                gridData: const FlGridData(show: false),
+                titlesData: const FlTitlesData(show: false),
+                borderData: FlBorderData(show: false),
+                lineBarsData: [
+                  LineChartBarData(
+                    spots: spots,
+                    isCurved: true,
+                    color: colors.brand,
+                    barWidth: 3,
+                    dotData: const FlDotData(show: false),
+                  ),
+                ],
+              ),
+            ),
           ),
         );
       },

@@ -73,6 +73,7 @@ class _InProgressView extends ConsumerWidget {
         actions: [
           IconButton(
             icon: const Icon(Icons.close),
+            tooltip: 'Descartar entrenamiento',
             onPressed: () => ref.read(activeWorkoutProvider.notifier).discard(),
           ),
         ],
@@ -84,8 +85,11 @@ class _InProgressView extends ConsumerWidget {
               width: double.infinity,
               color: colors.info.withValues(alpha: 0.15),
               padding: const EdgeInsets.all(12),
-              child: Text('Descanso: ${rest.secondsLeft}s',
-                  textAlign: TextAlign.center, style: TextStyle(color: colors.info, fontWeight: FontWeight.w700)),
+              child: Text(
+                'Descanso: ${rest.secondsLeft}s',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: colors.info, fontWeight: FontWeight.w700),
+              ),
             ),
           Expanded(
             child: ListView.builder(
@@ -107,14 +111,22 @@ class _InProgressView extends ConsumerWidget {
                 if (!context.mounted) return;
                 final rewardParts = <String>[];
                 if (result != null && result.newPersonalRecords > 0) {
-                  rewardParts.add('${result.newPersonalRecords} PR${result.newPersonalRecords > 1 ? "s" : ""} nuevo${result.newPersonalRecords > 1 ? "s" : ""} 🎉');
+                  rewardParts.add(
+                    '${result.newPersonalRecords} PR${result.newPersonalRecords > 1 ? "s" : ""} nuevo${result.newPersonalRecords > 1 ? "s" : ""} 🎉',
+                  );
                 }
                 if (result != null && result.unlockedAchievements.isNotEmpty) {
                   rewardParts.add('🏆 ${result.unlockedAchievements.map((a) => a.name).join(", ")}');
                 }
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content: Text(rewardParts.isEmpty ? 'Entrenamiento guardado' : 'Entrenamiento guardado — ${rewardParts.join(" · ")}'),
-                ));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      rewardParts.isEmpty
+                          ? 'Entrenamiento guardado'
+                          : 'Entrenamiento guardado — ${rewardParts.join(" · ")}',
+                    ),
+                  ),
+                );
               },
               child: const Text('Terminar entrenamiento'),
             ),
@@ -151,7 +163,9 @@ class _ExerciseCard extends ConsumerWidget {
               ),
             ),
             const SizedBox(height: 8),
-            ...exercise.sets.asMap().entries.map((entry) => _SetRow(exerciseIndex: exerciseIndex, setIndex: entry.key, set: entry.value)),
+            ...exercise.sets.asMap().entries.map(
+              (entry) => _SetRow(exerciseIndex: exerciseIndex, setIndex: entry.key, set: entry.value),
+            ),
             TextButton.icon(
               onPressed: () => ref.read(activeWorkoutProvider.notifier).addSet(exerciseIndex),
               icon: const Icon(Icons.add),
@@ -188,16 +202,31 @@ class _SetRowState extends ConsumerState<_SetRow> {
       child: Row(
         children: [
           SizedBox(width: 28, child: Text('${widget.set.setNumber}', style: Theme.of(context).textTheme.bodyMedium)),
-          Expanded(child: _Stepper(label: 'kg', value: _weight, step: 2.5, onChanged: (v) => setState(() => _weight = v))),
+          Expanded(
+            child: _Stepper(label: 'kg', value: _weight, step: 2.5, onChanged: (v) => setState(() => _weight = v)),
+          ),
           const SizedBox(width: 12),
-          Expanded(child: _Stepper(label: 'reps', value: _reps.toDouble(), step: 1, onChanged: (v) => setState(() => _reps = v.toInt()))),
+          Expanded(
+            child: _Stepper(
+              label: 'reps',
+              value: _reps.toDouble(),
+              step: 1,
+              onChanged: (v) => setState(() => _reps = v.toInt()),
+            ),
+          ),
           const SizedBox(width: 12),
           IconButton(
             // Peso 0 es valido (ejercicios con peso corporal); 0 reps no lo es.
-            icon: Icon(completed ? Icons.check_circle : Icons.check_circle_outline, color: completed ? colors.success : colors.textMuted),
+            icon: Icon(
+              completed ? Icons.check_circle : Icons.check_circle_outline,
+              color: completed ? colors.success : colors.textMuted,
+            ),
+            tooltip: completed ? 'Serie completada' : 'Completar serie',
             onPressed: completed || _reps <= 0
                 ? null
-                : () => ref.read(activeWorkoutProvider.notifier).completeSet(widget.exerciseIndex, widget.setIndex, weightKg: _weight, reps: _reps),
+                : () => ref
+                      .read(activeWorkoutProvider.notifier)
+                      .completeSet(widget.exerciseIndex, widget.setIndex, weightKg: _weight, reps: _reps),
           ),
         ],
       ),
@@ -212,22 +241,40 @@ class _Stepper extends StatelessWidget {
   final double step;
   final ValueChanged<double> onChanged;
 
+  String get _formatted => value == value.roundToDouble() ? value.toInt().toString() : value.toStringAsFixed(1);
+
   @override
   Widget build(BuildContext context) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
+        // Sin tooltip estos iconos no anuncian nada al lector de pantalla, y
+        // visualDensity.compact dejaba el area tactil por debajo de los 44x44
+        // que exige docs/DESIGN.md §8.
         IconButton(
-            icon: const Icon(Icons.remove, size: 18),
-            onPressed: () => onChanged((value - step).clamp(0, 999)),
-            visualDensity: VisualDensity.compact),
-        Column(
-          children: [
-            Text(value == value.roundToDouble() ? value.toInt().toString() : value.toStringAsFixed(1), style: Theme.of(context).textTheme.titleLarge),
-            Text(label, style: Theme.of(context).textTheme.bodySmall),
-          ],
+          icon: const Icon(Icons.remove, size: 18),
+          tooltip: 'Reducir $label',
+          onPressed: () => onChanged((value - step).clamp(0, 999)),
+          constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
         ),
-        IconButton(icon: const Icon(Icons.add, size: 18), onPressed: () => onChanged(value + step), visualDensity: VisualDensity.compact),
+        Semantics(
+          label: label,
+          value: _formatted,
+          child: ExcludeSemantics(
+            child: Column(
+              children: [
+                Text(_formatted, style: Theme.of(context).textTheme.titleLarge),
+                Text(label, style: Theme.of(context).textTheme.bodySmall),
+              ],
+            ),
+          ),
+        ),
+        IconButton(
+          icon: const Icon(Icons.add, size: 18),
+          tooltip: 'Aumentar $label',
+          onPressed: () => onChanged(value + step),
+          constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+        ),
       ],
     );
   }
@@ -248,8 +295,15 @@ class _AddExerciseButton extends ConsumerWidget {
         final selected = await showModalBottomSheet<ExerciseSummary>(
           context: context,
           builder: (context) => ListView(
-            children:
-                exercises.map((e) => ListTile(title: Text(e.name), subtitle: Text(e.primaryMuscle), onTap: () => Navigator.pop(context, e))).toList(),
+            children: exercises
+                .map(
+                  (e) => ListTile(
+                    title: Text(e.name),
+                    subtitle: Text(e.primaryMuscle),
+                    onTap: () => Navigator.pop(context, e),
+                  ),
+                )
+                .toList(),
           ),
         );
         if (selected != null) {

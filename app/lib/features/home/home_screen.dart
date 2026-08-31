@@ -9,7 +9,9 @@ import '../auth/auth_providers.dart';
 import '../workout/workout_providers.dart';
 
 final statsProvider = FutureProvider.autoDispose<UserStats>((ref) => ref.watch(apiRepositoryProvider).stats());
-final currentAssignmentProvider = FutureProvider.autoDispose<CurrentAssignment?>((ref) => ref.watch(apiRepositoryProvider).currentAssignment());
+final currentAssignmentProvider = FutureProvider.autoDispose<CurrentAssignment?>(
+  (ref) => ref.watch(apiRepositoryProvider).currentAssignment(),
+);
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -26,10 +28,12 @@ class HomeScreen extends ConsumerWidget {
         actions: [
           IconButton(
             icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Ajustes',
             onPressed: () => context.push('/settings'),
           ),
           IconButton(
             icon: const Icon(Icons.logout),
+            tooltip: 'Cerrar sesion',
             onPressed: () => ref.read(authControllerProvider.notifier).logout(),
           ),
         ],
@@ -83,7 +87,10 @@ class _PendingSyncBanner extends ConsumerWidget {
               Icon(Icons.cloud_off, color: colors.warning),
               const SizedBox(width: 10),
               Expanded(
-                child: Text('$pending entrenamiento${pending > 1 ? "s" : ""} sin sincronizar', style: TextStyle(color: colors.text)),
+                child: Text(
+                  '$pending entrenamiento${pending > 1 ? "s" : ""} sin sincronizar',
+                  style: TextStyle(color: colors.text),
+                ),
               ),
               TextButton(
                 onPressed: syncing
@@ -92,7 +99,9 @@ class _PendingSyncBanner extends ConsumerWidget {
                         await ref.read(syncQueueProvider.notifier).syncNow();
                         ref.invalidate(pendingSyncCountProvider);
                       },
-                child: syncing ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Reintentar'),
+                child: syncing
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Text('Reintentar'),
               ),
             ],
           ),
@@ -121,11 +130,13 @@ class _StreakAndXpRow extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(children: [
-                    Icon(Icons.local_fire_department, color: colors.streakFire, size: 28),
-                    const SizedBox(width: 4),
-                    Text('$workoutStreak', style: Theme.of(context).textTheme.displayMedium),
-                  ]),
+                  Row(
+                    children: [
+                      Icon(Icons.local_fire_department, color: colors.streakFire, size: 28),
+                      const SizedBox(width: 4),
+                      Text('$workoutStreak', style: Theme.of(context).textTheme.displayMedium),
+                    ],
+                  ),
                   const SizedBox(height: 4),
                   Text('días seguidos', style: Theme.of(context).textTheme.bodySmall),
                 ],
@@ -145,7 +156,12 @@ class _StreakAndXpRow extends StatelessWidget {
                   const SizedBox(height: 8),
                   ClipRRect(
                     borderRadius: BorderRadius.circular(8),
-                    child: LinearProgressIndicator(value: progress, minHeight: 8, backgroundColor: colors.border, color: colors.brand),
+                    child: LinearProgressIndicator(
+                      value: progress,
+                      minHeight: 8,
+                      backgroundColor: colors.border,
+                      color: colors.brand,
+                    ),
                   ),
                   const SizedBox(height: 4),
                   Text('${stats.totalXP} XP', style: Theme.of(context).textTheme.bodySmall),
@@ -175,7 +191,10 @@ class _TodayWorkoutCard extends StatelessWidget {
             children: [
               Text('Sin plan asignado', style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 8),
-              Text('Pídele a tu coach que te asigne un programa, o entrena libre.', style: Theme.of(context).textTheme.bodyMedium),
+              Text(
+                'Pídele a tu coach que te asigne un programa, o entrena libre.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
               const SizedBox(height: 16),
               ElevatedButton(onPressed: () => context.go('/workout'), child: const Text('Entrenar de todos modos')),
             ],
@@ -184,7 +203,10 @@ class _TodayWorkoutCard extends StatelessWidget {
       );
     }
 
-    final next = assignment!.workouts.firstWhere((w) => w.status == 'pending', orElse: () => assignment!.workouts.first);
+    final next = assignment!.workouts.firstWhere(
+      (w) => w.status == 'pending',
+      orElse: () => assignment!.workouts.first,
+    );
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(20),
@@ -195,8 +217,10 @@ class _TodayWorkoutCard extends StatelessWidget {
             const SizedBox(height: 4),
             Text(next.name, style: Theme.of(context).textTheme.headlineMedium),
             const SizedBox(height: 4),
-            Text('Semana ${next.weekNumber} · Día ${next.dayIndex} · ${next.exercises.length} ejercicios',
-                style: Theme.of(context).textTheme.bodySmall),
+            Text(
+              'Semana ${next.weekNumber} · Día ${next.dayIndex} · ${next.exercises.length} ejercicios',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
             const SizedBox(height: 16),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: colors.brand),
