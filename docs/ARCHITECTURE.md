@@ -17,13 +17,14 @@ progresión de cargas y una capa de IA propone ajustes que el coach aprueba.
 | Progresión | Determinista (doble progresión / RPE) | Es una fórmula. Un LLM decidiendo cargas sin historial es un riesgo de lesión |
 | IA | Claude API, propone → coach aprueba. Modelo por `ANTHROPIC_SUGGESTION_MODEL` (default `claude-opus-5`) | Trazabilidad y responsabilidad clínica |
 | Repos | Monorepo + Docker Compose en VPS | Un solo sitio, control de costes |
+| Metodología | SDD (Spec-Driven Dev + Software Design Doc) | [docs/SDD_METHODOLOGY.md](./SDD_METHODOLOGY.md) |
 | v1 | Entrenamiento + hábitos | Nutrición queda para v2, el esquema ya la contempla |
 
-**Arquitectura elegida: monolito modular.** Un solo binario Go con módulos aislados
+**Arquitectura elegida: monolito modular hexagonal (Ports & Adapters).** Un solo binario Go con módulos aislados
 (`identity`, `catalog`, `programming`, `training`, `habits`, `gamification`, `insights`).
 No hay microservicios: un gimnasio de 500 socios cabe entero en una instancia. Los módulos
-se comunican por interfaces de servicio, así que si alguno necesita salir después, sale sin
-reescribir el resto.
+se comunican por interfaces de servicio y puertos de dominio, así que si alguno necesita salir después, sale sin
+reescribir el resto. Toda funcionalidad nueva sigue el ciclo de vida SDD formal ([docs/SDD_METHODOLOGY.md](./SDD_METHODOLOGY.md)).
 
 ## 2. Estructura del monorepo
 
@@ -143,13 +144,25 @@ worker procesa toda asignación activa que tenga coach. Si se quiere, va en
 ## 5. Sincronización offline
 
 El móvil cachea en Drift el entrenamiento asignado, el catálogo de ejercicios usado y los
-hábitos activos. Todo lo que el usuario **escribe** durante una sesión va primero a una cola
-local (`pending_mutation`) y luego al servidor.
+hábitos activos. Lo que el usuario **escribe** durante una sesión se guarda primero en la
+tabla Drift correspondiente con `synced = false`; no hay una tabla `pending_mutation`
+aparte. El store expone `saveSession` → `unsyncedSessions()` → `markSynced(localId)`
+(`app/lib/core/storage/workout_store.dart`). El reintento se dispara al abrir la app y al
+volver a foreground (`home_shell.dart`); no hay backoff exponencial ni escucha de
+conectividad. El endpoint de sync es un `POST` por lotes.
 
-Idempotencia: el móvil genera un `client_local_id` (UUID) por sesión, por serie y por
-registro de hábito. Las tres tablas tienen `UNIQUE (user_id, client_local_id)`, así que
-reenviar la cola tras un corte de red no duplica nada. El endpoint de sync es un `POST`
-por lotes que devuelve el resultado por elemento.
+Idempotencia, con la precisión que costó un incidente: el móvil genera un `client_local_id`
+(UUID) por sesión, por serie y por registro de hábito, y las tres tablas tienen
+`UNIQUE (user_id, client_local_id)`. Eso da idempotencia **de transporte** — reenviar el
+mismo lote no duplica filas. No basta cuando la tabla tiene además una **restricción de
+negocio** más estrecha: `habit_log` tiene `UNIQUE (client_habit_id, log_date)`, y resolver
+el `ON CONFLICT` contra `client_local_id` dejaba escapar el segundo check-in del mismo día
+con otro `client_local_id` como un 500 con el nombre de la constraint en el cuerpo. La regla
+es apuntar el `ON CONFLICT` a la restricción de negocio cuando existe.
+
+Para no repetir premios en un reenvío, las queries de upsert devuelven
+`(xmax = 0) AS inserted` y el service solo otorga XP, rachas y logros cuando ese flag es
+verdadero.
 
 No se resuelven conflictos de escritura concurrente: un cliente entrena desde un
 dispositivo a la vez. **Lo que el móvil escribió gana.**
