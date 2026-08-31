@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"myvibesfit/api/internal/adapter/postgres"
+	"myvibesfit/api/internal/adapter/push"
 	"myvibesfit/api/internal/config"
 	"myvibesfit/api/internal/domain"
 	"myvibesfit/api/internal/platform"
@@ -61,12 +62,21 @@ func main() {
 	coachRepo := postgres.NewCoachRepository(queries)
 	aiSuggestionRepo := postgres.NewAISuggestionRepository(queries)
 	profileRepo := postgres.NewProfileRepository(queries)
+	deviceTokenRepo := postgres.NewDeviceTokenRepository(queries)
 	uow := postgres.NewUnitOfWork(pool)
+
+	// Sin credenciales de FCM el envio queda en no-op y la API arranca igual:
+	// el desarrollo local no depende de una cuenta de Firebase.
+	var pushSender domain.PushSender = push.NewNoopSender(logger)
+	if cfg.FCMCredentialsJSON == "" {
+		logger.Info("push notifications deshabilitadas: falta FCM_CREDENTIALS_JSON")
+	}
+	notificationSvc := service.NewNotificationService(deviceTokenRepo, pushSender, logger)
 
 	authSvc := service.NewAuthService(identityRepo, signer, cfg.JWTRefreshTTL)
 	exerciseSvc := service.NewExerciseService(exerciseRepo)
 	programSvc := service.NewProgramService(programRepo, auditLogger)
-	assignmentSvc := service.NewAssignmentService(assignmentRepo, programRepo, uow, auditLogger)
+	assignmentSvc := service.NewAssignmentService(assignmentRepo, programRepo, uow, auditLogger, notificationSvc)
 	gamificationSvc := domain.NewGamificationService()
 	syncSvc := service.NewSyncService(uow, gamificationSvc, assignmentRepo, programRepo)
 	progressSvc := service.NewProgressService(progressRepo)
@@ -87,6 +97,7 @@ func main() {
 		Coach:        handler.NewCoachHandler(coachSvc),
 		AISuggestion: handler.NewAISuggestionHandler(aiSuggestionSvc),
 		Profile:      handler.NewProfileHandler(profileSvc),
+		DeviceToken:  handler.NewDeviceTokenHandler(notificationSvc),
 	}, signer, cfg.CORSAllowedOrigins)
 
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: router}

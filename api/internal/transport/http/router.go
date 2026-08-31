@@ -26,6 +26,7 @@ type Handlers struct {
 	Coach        *handler.CoachHandler
 	AISuggestion *handler.AISuggestionHandler
 	Profile      *handler.ProfileHandler
+	DeviceToken  *handler.DeviceTokenHandler
 }
 
 func NewRouter(h Handlers, signer *platform.JWTSigner, corsOrigins []string) http.Handler {
@@ -68,6 +69,8 @@ func NewRouter(h Handlers, signer *platform.JWTSigner, corsOrigins []string) htt
 			r.Get("/me", h.Auth.Me)
 			r.Get("/me/profile", h.Profile.Get)
 			r.Put("/me/profile", h.Profile.Save)
+			r.Post("/me/device-tokens", h.DeviceToken.Register)
+			r.Delete("/me/device-tokens", h.DeviceToken.Unregister)
 			r.Post("/orgs", h.Auth.CreateOrg)
 			r.Post("/orgs/join", h.Auth.JoinOrg)
 			r.Get("/me/assignment/current", h.Assignment.CurrentForMe)

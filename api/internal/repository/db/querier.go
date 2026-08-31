@@ -34,6 +34,7 @@ type Querier interface {
 	CreateUser(ctx context.Context, arg CreateUserParams) (AppUser, error)
 	CreateXPEvent(ctx context.Context, arg CreateXPEventParams) (XpEvent, error)
 	DeactivateExercise(ctx context.Context, arg DeactivateExerciseParams) (int64, error)
+	DeleteDeviceToken(ctx context.Context, arg DeleteDeviceTokenParams) (int64, error)
 	DeleteProgramExercise(ctx context.Context, id uuid.UUID) error
 	DeleteProgramWorkout(ctx context.Context, id uuid.UUID) error
 	// La proxima vez que este ejercicio aparece en el plan, saltando el dia que
@@ -78,6 +79,7 @@ type Querier interface {
 	ListAssignedWorkouts(ctx context.Context, assignmentID uuid.UUID) ([]AssignedWorkout, error)
 	ListBodyMetrics(ctx context.Context, arg ListBodyMetricsParams) ([]BodyMetric, error)
 	ListCoachClients(ctx context.Context, arg ListCoachClientsParams) ([]ListCoachClientsRow, error)
+	ListDeviceTokensByUser(ctx context.Context, userID uuid.UUID) ([]DeviceToken, error)
 	ListExercises(ctx context.Context, arg ListExercisesParams) ([]Exercise, error)
 	ListHabitLogsForDate(ctx context.Context, arg ListHabitLogsForDateParams) ([]HabitLog, error)
 	ListHabits(ctx context.Context, orgID pgtype.UUID) ([]Habit, error)
@@ -113,6 +115,10 @@ type Querier interface {
 	UpdateProgramWorkout(ctx context.Context, arg UpdateProgramWorkoutParams) (ProgramWorkout, error)
 	UpsertBodyMetric(ctx context.Context, arg UpsertBodyMetricParams) (BodyMetric, error)
 	UpsertClientProfile(ctx context.Context, arg UpsertClientProfileParams) (ClientProfile, error)
+	// El conflicto se resuelve por token, no por (user_id, token): el token es
+	// UNIQUE global y FCM devuelve el mismo cuando otro usuario entra en el
+	// mismo telefono, asi que la fila tiene que cambiar de dueno.
+	UpsertDeviceToken(ctx context.Context, arg UpsertDeviceTokenParams) (DeviceToken, error)
 	// El conflicto real es "este habito ya se registro hoy", no el
 	// client_local_id: la app genera un uuid nuevo en cada tap, asi que con el
 	// target viejo un segundo tap chocaba contra

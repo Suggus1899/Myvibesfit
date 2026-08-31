@@ -15,11 +15,18 @@ type AssignmentService struct {
 	repo        domain.AssignmentRepository
 	programRepo domain.ProgramRepository
 	uow         domain.UnitOfWork
+	notifier    userNotifier
 	audit       *AuditLogger
 }
 
-func NewAssignmentService(repo domain.AssignmentRepository, programRepo domain.ProgramRepository, uow domain.UnitOfWork, audit *AuditLogger) *AssignmentService {
-	return &AssignmentService{repo: repo, programRepo: programRepo, uow: uow, audit: audit}
+// userNotifier es el subconjunto de NotificationService que este caso de uso
+// necesita. Con una interfaz el test no tiene que armar toda la cadena de push.
+type userNotifier interface {
+	NotifyUser(ctx context.Context, userID uuid.UUID, n domain.Notification)
+}
+
+func NewAssignmentService(repo domain.AssignmentRepository, programRepo domain.ProgramRepository, uow domain.UnitOfWork, audit *AuditLogger, notifier userNotifier) *AssignmentService {
+	return &AssignmentService{repo: repo, programRepo: programRepo, uow: uow, audit: audit, notifier: notifier}
 }
 
 type AssignInput struct {
@@ -123,6 +130,9 @@ func (s *AssignmentService) Assign(ctx context.Context, in AssignInput) (domain.
 	s.audit.Log(ctx, in.OrgID, in.CoachUserID, "assignment.assign", "assignment", assignment.ID.String(), map[string]any{
 		"program_id": in.ProgramID, "client_user_id": in.ClientUserID,
 	})
+	// Despues del commit, nunca dentro de uow.Execute: una llamada de red al
+	// proveedor de push mantendria la transaccion abierta a merced de su latencia.
+	s.notifier.NotifyUser(ctx, in.ClientUserID, domain.PlanAssignedNotification(program.Name))
 	return assignment, nil
 }
 

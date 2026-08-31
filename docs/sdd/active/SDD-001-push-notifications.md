@@ -2,7 +2,7 @@
 > **Tipo:** Feature Full-Stack (Backend + Móvil)
 > **Fecha:** 2026-08-31
 > **Autor / Responsable:** Gustavo Colina
-> **Estado:** `Draft`
+> **Estado:** `Approved` — backend implementado y verificado; pendientes el adapter FCM y la integración Flutter (ver §9)
 
 ---
 
@@ -27,9 +27,9 @@ Roles impactados: `client` (recibe). El `coach` queda fuera de este incremento �
       asigna un programa, con la app cerrada.
 - [ ] **O2:** Un cliente con racha activa que no registró su hábito recibe un recordatorio en
       la ventana horaria configurada, una sola vez por día.
-- [ ] **O3:** Registrar el mismo dispositivo N veces deja **una** fila en `device_token`.
+- [x] **O3:** Registrar el mismo dispositivo N veces deja **una** fila en `device_token`.
 - [ ] **O4:** Un token que FCM reporta como muerto se borra solo; la tabla no crece sin techo.
-- [ ] **O5:** Sin credenciales de FCM configuradas, la API arranca igual y el envío es un no-op.
+- [x] **O5:** Sin credenciales de FCM configuradas, la API arranca igual y el envío es un no-op.
       El desarrollo local no depende de Firebase.
 
 ### 1.3 Fuera de Alcance (Non-goals)
@@ -69,7 +69,7 @@ const (
 type DeviceTokenRepository interface {
     Upsert(ctx context.Context, userID uuid.UUID, token, platform string) (DeviceToken, error)
     ListByUser(ctx context.Context, userID uuid.UUID) ([]DeviceToken, error)
-    Delete(ctx context.Context, token string) error
+    Delete(ctx context.Context, userID uuid.UUID, token string) (bool, error)
 }
 
 // PushSender es el port hacia el proveedor de push, con la misma forma que
@@ -124,10 +124,10 @@ ON CONFLICT (token) DO UPDATE
 RETURNING *;
 
 -- name: ListDeviceTokensByUser :many
-SELECT * FROM device_token WHERE user_id = $1;
+SELECT * FROM device_token WHERE user_id = $1 ORDER BY last_seen_at DESC;
 
 -- name: DeleteDeviceToken :execrows
-DELETE FROM device_token WHERE token = $1;
+DELETE FROM device_token WHERE token = $1 AND user_id = $2;
 ```
 
 `DeleteDeviceToken` es `:execrows` para poder distinguir "no estaba" de "se borró" sin una
@@ -165,14 +165,14 @@ Validación en el handler: `token` no vacío, `platform` dentro del enum. Cualqu
 
 ## 5. Diseño Hexagonal (Backend Go)
 
-### 5.1 Adapter (`internal/adapter/fcm/sender.go`)
+### 5.1 Adapter (`internal/adapter/push/`)
 
-Implementa `domain.PushSender` sobre `firebase.google.com/go/v4/messaging`. Traduce la respuesta
+`fcm.go` implementa `domain.PushSender` sobre `firebase.google.com/go/v4/messaging`. Traduce la respuesta
 de FCM: `UNREGISTERED` e `INVALID_ARGUMENT` sobre el token → lista `dead`. Es el único archivo
 que importa el SDK de Firebase, igual que `adapter/anthropic/` es el único que importa el de
 Anthropic.
 
-**`NoopSender`** en el mismo paquete: implementa el port y registra en log lo que habría
+**`noop.go`** en el mismo paquete: implementa el port y registra en log lo que habría
 enviado. Es lo que se cablea cuando no hay credenciales (**O5**).
 
 ### 5.2 Configuración (`internal/config/config.go`)
@@ -211,12 +211,15 @@ s.notifications.NotifyUser(ctx, clientUserID, planAssignedNotification(programNa
 ```
 
 **Racha en riesgo** — pasada nueva en `cmd/worker`, que ya es un binario de una corrida pensado
-para cron. Busca usuarios con racha activa y sin `habit_log` de hoy, y notifica. La ventana
-horaria sale de `STREAK_REMINDER_HOUR` (default `20`), en la zona del servidor.
+para cron. Busca usuarios con racha activa y sin `habit_log` de hoy, y notifica. La hora de la
+ventana sale de `STREAK_REMINDER_HOUR` (default `20`).
 
-> Deuda que este SDD asume a conciencia: `app_user` no guarda zona horaria, así que la ventana es
-> global. Para un gimnasio con una sola sede es correcto. Cuando haya clientes en otro huso, esto
-> necesita una columna y su propio SDD.
+> Corregido tras verificar contra el esquema: `app_user` **sí** tiene columna `timezone`
+> (`0001_init.sql`, default `'UTC'`), y `domain.User.Timezone` ya la transporta. La deuda real es
+> otra: **ninguna query la escribe**, así que hoy todos los usuarios leen como `UTC`. El batch
+> debe agrupar por `timezone` desde el principio —el esquema lo permite— y queda pendiente que el
+> onboarding envíe la zona real del dispositivo.
+
 
 ---
 
@@ -257,13 +260,13 @@ del cliente móvil.
 
 ## 9. Plan de Verificación y Testing
 
-- [ ] **Dominio/servicio con fakes:** `go test ./internal/service/...`
+- [x] **Dominio/servicio con fakes:** `go test ./internal/service/...`
   - `NotifyUser` borra los tokens que el sender devolvió como muertos.
   - Un `PushSender` que devuelve error **no** hace fallar `Assign`.
   - Sin tokens registrados, no se llama al sender.
-- [ ] **Upsert contra Postgres real:** registrar el mismo token con el usuario A y después con el
+- [x] **Upsert contra Postgres real:** registrar el mismo token con el usuario A y después con el
   B → **una** fila, `user_id` = B. Es la invariante 1 y ningún test con fakes la prueba.
-- [ ] **Arranque sin credenciales:** `cmd/api` levanta y loguea que el push está deshabilitado (**O5**).
+- [x] **Arranque sin credenciales:** `cmd/api` levanta y loguea que el push está deshabilitado (**O5**).
 - [ ] **Verificación de capas:**
   - Backend: `cd api && go vet ./... && go test ./... && go build ./... && gofmt -l .`
   - Móvil: `cd app && flutter analyze && flutter test`

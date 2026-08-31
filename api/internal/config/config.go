@@ -16,6 +16,8 @@ type Config struct {
 	JWTAccessTTL       time.Duration
 	JWTRefreshTTL      time.Duration
 	CORSAllowedOrigins []string
+	FCMProjectID       string
+	FCMCredentialsJSON string
 }
 
 func Load() (*Config, error) {
@@ -24,6 +26,10 @@ func Load() (*Config, error) {
 		Env:             getEnv("ENV", "development"),
 		DatabaseURL:     os.Getenv("DATABASE_URL"),
 		JWTAccessSecret: os.Getenv("JWT_ACCESS_SECRET"),
+		// Opcionales a proposito: sin credenciales la API arranca igual y el
+		// envio de push queda en no-op (criterio O5 de SDD-001).
+		FCMProjectID:       getEnv("FCM_PROJECT_ID", ""),
+		FCMCredentialsJSON: getEnv("FCM_CREDENTIALS_JSON", ""),
 	}
 
 	// En development, sin config explicita, se abre a los puertos locales
