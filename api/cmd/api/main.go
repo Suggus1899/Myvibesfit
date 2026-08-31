@@ -70,6 +70,20 @@ func main() {
 	var pushSender domain.PushSender = push.NewNoopSender(logger)
 	if cfg.FCMCredentialsJSON == "" {
 		logger.Info("push notifications deshabilitadas: falta FCM_CREDENTIALS_JSON")
+	} else {
+		// Si el operador configuro credenciales y estan rotas, no se degrada
+		// en silencio a no-op: pidio push y hay que decirle que no las tiene.
+		creds, err := os.ReadFile(cfg.FCMCredentialsJSON)
+		if err != nil {
+			logger.Error("no se pudo leer FCM_CREDENTIALS_JSON", "error", err)
+			os.Exit(1)
+		}
+		fcm, err := push.NewFCMSender(ctx, creds, cfg.FCMProjectID, logger)
+		if err != nil {
+			logger.Error("no se pudo inicializar el envio de push", "error", err)
+			os.Exit(1)
+		}
+		pushSender = fcm
 	}
 	notificationSvc := service.NewNotificationService(deviceTokenRepo, pushSender, logger)
 

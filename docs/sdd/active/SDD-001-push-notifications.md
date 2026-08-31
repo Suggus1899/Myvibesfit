@@ -167,13 +167,20 @@ Validación en el handler: `token` no vacío, `platform` dentro del enum. Cualqu
 
 ### 5.1 Adapter (`internal/adapter/push/`)
 
-`fcm.go` implementa `domain.PushSender` sobre `firebase.google.com/go/v4/messaging`. Traduce la respuesta
-de FCM: `UNREGISTERED` e `INVALID_ARGUMENT` sobre el token → lista `dead`. Es el único archivo
-que importa el SDK de Firebase, igual que `adapter/anthropic/` es el único que importa el de
-Anthropic.
+`fcm.go` implementa `domain.PushSender` hablando el **HTTP v1 de FCM directamente** sobre
+`net/http` + `golang.org/x/oauth2/google`. Se descartó `firebase-admin-go` a propósito: para
+enviar un mensaje arrastraba grpc, protobuf, genproto y appengine, y subía grpc de 1.64 a 1.81.
+El coste real en `go.mod` fue de **dos líneas indirectas**. Traduce la respuesta de FCM:
+`UNREGISTERED` e `INVALID_ARGUMENT` → lista `dead`; un 503 o un 429 **no** marcan tokens muertos,
+porque desregistrarían dispositivos sanos en cada caída del proveedor.
 
-**`noop.go`** en el mismo paquete: implementa el port y registra en log lo que habría
-enviado. Es lo que se cablea cuando no hay credenciales (**O5**).
+**`noop.go`** en el mismo paquete: implementa el port y registra en log lo que habría enviado.
+Es lo que se cablea cuando no hay credenciales (**O5**).
+
+> La traducción de errores se verifica con un `httptest.Server` que imita a FCM
+> (`fcm_test.go`), así que esa lógica está probada sin credenciales ni red. Lo que sigue sin
+> verificar es la entrega real: hace falta un proyecto Firebase y un dispositivo físico.
+
 
 ### 5.2 Configuración (`internal/config/config.go`)
 
