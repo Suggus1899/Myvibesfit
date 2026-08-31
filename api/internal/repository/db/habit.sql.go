@@ -287,9 +287,9 @@ func (q *Queries) UnsubscribeHabit(ctx context.Context, arg UnsubscribeHabitPara
 const upsertHabitLog = `-- name: UpsertHabitLog :one
 INSERT INTO habit_log (client_local_id, client_habit_id, user_id, log_date, value, is_completed)
 VALUES ($1, $2, $3, $4, $5, $6)
-ON CONFLICT (user_id, client_local_id) DO UPDATE SET
+ON CONFLICT (client_habit_id, log_date) DO UPDATE SET
   value = EXCLUDED.value, is_completed = EXCLUDED.is_completed
-RETURNING id, client_local_id, client_habit_id, user_id, log_date, value, is_completed, logged_at
+RETURNING id, client_local_id, client_habit_id, user_id, log_date, value, is_completed, logged_at, (xmax = 0) AS inserted
 `
 
 type UpsertHabitLogParams struct {
@@ -301,7 +301,25 @@ type UpsertHabitLogParams struct {
 	IsCompleted   bool      `json:"is_completed"`
 }
 
-func (q *Queries) UpsertHabitLog(ctx context.Context, arg UpsertHabitLogParams) (HabitLog, error) {
+type UpsertHabitLogRow struct {
+	ID            int64     `json:"id"`
+	ClientLocalID uuid.UUID `json:"client_local_id"`
+	ClientHabitID uuid.UUID `json:"client_habit_id"`
+	UserID        uuid.UUID `json:"user_id"`
+	LogDate       time.Time `json:"log_date"`
+	Value         float64   `json:"value"`
+	IsCompleted   bool      `json:"is_completed"`
+	LoggedAt      time.Time `json:"logged_at"`
+	Inserted      bool      `json:"inserted"`
+}
+
+// El conflicto real es "este habito ya se registro hoy", no el
+// client_local_id: la app genera un uuid nuevo en cada tap, asi que con el
+// target viejo un segundo tap chocaba contra
+// habit_log_client_habit_id_log_date_key y devolvia un 500 con el error de
+// Postgres crudo. inserted (xmax = 0) deja distinguir el primer registro del
+// dia de un reenvio, para no volver a otorgar XP.
+func (q *Queries) UpsertHabitLog(ctx context.Context, arg UpsertHabitLogParams) (UpsertHabitLogRow, error) {
 	row := q.db.QueryRow(ctx, upsertHabitLog,
 		arg.ClientLocalID,
 		arg.ClientHabitID,
@@ -310,7 +328,7 @@ func (q *Queries) UpsertHabitLog(ctx context.Context, arg UpsertHabitLogParams) 
 		arg.Value,
 		arg.IsCompleted,
 	)
-	var i HabitLog
+	var i UpsertHabitLogRow
 	err := row.Scan(
 		&i.ID,
 		&i.ClientLocalID,
@@ -320,6 +338,7 @@ func (q *Queries) UpsertHabitLog(ctx context.Context, arg UpsertHabitLogParams) 
 		&i.Value,
 		&i.IsCompleted,
 		&i.LoggedAt,
+		&i.Inserted,
 	)
 	return i, err
 }

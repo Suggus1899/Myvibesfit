@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"myvibesfit/api/internal/domain"
 	"myvibesfit/api/internal/repository/db"
@@ -100,9 +101,22 @@ func (r *HabitRepository) UpsertLog(ctx context.Context, l domain.HabitLog) (dom
 		LogDate: l.LogDate, Value: l.Value, IsCompleted: l.IsCompleted,
 	})
 	if err != nil {
+		// Queda un 23505 posible: reusar un client_local_id ya gastado en
+		// otro habito o dia. Es input invalido del cliente, no un 500 con el
+		// error de Postgres crudo encima.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return domain.HabitLog{}, domain.ErrAlreadyExists
+		}
 		return domain.HabitLog{}, err
 	}
-	return toDomainHabitLog(row), nil
+	// El upsert devuelve una fila propia (trae la bandera inserted), no
+	// db.HabitLog, asi que se mapea aparte.
+	return domain.HabitLog{
+		ID: row.ID, ClientLocalID: row.ClientLocalID, ClientHabitID: row.ClientHabitID, UserID: row.UserID,
+		LogDate: row.LogDate, Value: row.Value, IsCompleted: row.IsCompleted, LoggedAt: row.LoggedAt,
+		Inserted: row.Inserted,
+	}, nil
 }
 
 func (r *HabitRepository) ListLogsForDate(ctx context.Context, userID uuid.UUID, date time.Time) ([]domain.HabitLog, error) {

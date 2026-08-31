@@ -101,7 +101,10 @@ func (s *HabitService) LogHabit(ctx context.Context, in LogHabitInput) (HabitLog
 		}
 		result = HabitLogResult{Log: log}
 
-		if !in.IsCompleted {
+		// Solo el primer registro del dia premia. Un reenvio (reintento de
+		// red, doble tap, resync al reabrir la app) actualiza la fila pero no
+		// vuelve a otorgar XP ni a mover la racha.
+		if !in.IsCompleted || !log.Inserted {
 			return nil
 		}
 

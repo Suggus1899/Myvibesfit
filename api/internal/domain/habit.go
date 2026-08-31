@@ -58,6 +58,11 @@ type HabitLog struct {
 	Value         float64
 	IsCompleted   bool
 	LoggedAt      time.Time
+
+	// Inserted distingue el primer registro del dia de un reenvio. La fila es
+	// idempotente por (client_habit_id, log_date); el XP y la racha tambien
+	// tienen que serlo.
+	Inserted bool
 }
 
 // HabitRepository espeja habit.sql.go (10 metodos).

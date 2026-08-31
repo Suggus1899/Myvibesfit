@@ -31,9 +31,15 @@ UPDATE client_habit SET ended_on = CURRENT_DATE WHERE id = $1 AND user_id = $2;
 -- name: UpsertHabitLog :one
 INSERT INTO habit_log (client_local_id, client_habit_id, user_id, log_date, value, is_completed)
 VALUES ($1, $2, $3, $4, $5, $6)
-ON CONFLICT (user_id, client_local_id) DO UPDATE SET
+-- El conflicto real es "este habito ya se registro hoy", no el
+-- client_local_id: la app genera un uuid nuevo en cada tap, asi que con el
+-- target viejo un segundo tap chocaba contra
+-- habit_log_client_habit_id_log_date_key y devolvia un 500 con el error de
+-- Postgres crudo. inserted (xmax = 0) deja distinguir el primer registro del
+-- dia de un reenvio, para no volver a otorgar XP.
+ON CONFLICT (client_habit_id, log_date) DO UPDATE SET
   value = EXCLUDED.value, is_completed = EXCLUDED.is_completed
-RETURNING *;
+RETURNING *, (xmax = 0) AS inserted;
 
 -- name: ListHabitLogsForDate :many
 SELECT * FROM habit_log WHERE user_id = $1 AND log_date = $2;

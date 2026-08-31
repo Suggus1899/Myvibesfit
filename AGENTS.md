@@ -181,10 +181,6 @@ Tailwind v4 + shadcn/ui, `pnpm lint` y `pnpm build` limpios:
 Auditorías previas (go-reviewer, architect, database-reviewer) dejaron esto
 documentado — no hace falta volver a auditar, están confirmados:
 
-- **`UpsertHabitLog` sigue sin ser idempotente en recompensas.** El sync de
-  sesiones ya se arregló (`UpsertWorkoutSession` devuelve `inserted` vía
-  `xmax = 0` y solo premia las nuevas); el check-in de hábitos todavía otorga
-  XP en cada reenvío. Mismo patrón, falta aplicarlo.
 - **`TxRepos` pasó el umbral**: 6 campos y 5 flujos, ninguno usa todos. La
   señal para repartirlo ahora es el primer flujo que necesite otro nivel de
   aislamiento, no el conteo.

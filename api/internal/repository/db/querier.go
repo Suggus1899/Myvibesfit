@@ -113,7 +113,13 @@ type Querier interface {
 	UpdateProgramWorkout(ctx context.Context, arg UpdateProgramWorkoutParams) (ProgramWorkout, error)
 	UpsertBodyMetric(ctx context.Context, arg UpsertBodyMetricParams) (BodyMetric, error)
 	UpsertClientProfile(ctx context.Context, arg UpsertClientProfileParams) (ClientProfile, error)
-	UpsertHabitLog(ctx context.Context, arg UpsertHabitLogParams) (HabitLog, error)
+	// El conflicto real es "este habito ya se registro hoy", no el
+	// client_local_id: la app genera un uuid nuevo en cada tap, asi que con el
+	// target viejo un segundo tap chocaba contra
+	// habit_log_client_habit_id_log_date_key y devolvia un 500 con el error de
+	// Postgres crudo. inserted (xmax = 0) deja distinguir el primer registro del
+	// dia de un reenvio, para no volver a otorgar XP.
+	UpsertHabitLog(ctx context.Context, arg UpsertHabitLogParams) (UpsertHabitLogRow, error)
 	UpsertPersonalRecord(ctx context.Context, arg UpsertPersonalRecordParams) (PersonalRecord, error)
 	UpsertSessionExercise(ctx context.Context, arg UpsertSessionExerciseParams) (SessionExercise, error)
 	UpsertSetLog(ctx context.Context, arg UpsertSetLogParams) (SetLog, error)
