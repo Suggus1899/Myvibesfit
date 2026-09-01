@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Nav } from "@/components/nav";
 import { apiFetch, getAccessToken } from "@/lib/api";
@@ -10,6 +11,7 @@ import { apiFetch, getAccessToken } from "@/lib/api";
 type CoachClient = {
   client_user_id: string;
   full_name: string;
+  assignment_id?: string;
   assignment_name?: string;
   has_assignment: boolean;
   last_session_at?: string;
@@ -50,6 +52,7 @@ export default function ClientDetailPage() {
   const [records, setRecords] = useState<PersonalRecord[] | null>(null);
   const [catalog, setCatalog] = useState<Exercise[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
 
   useEffect(() => {
     if (!getAccessToken()) {
@@ -74,6 +77,25 @@ export default function ClientDetailPage() {
       .then(setCatalog)
       .catch(() => setCatalog([]));
   }, [id, router]);
+
+  // Cancelar deja al cliente sin plan activo, así que se confirma antes: no es
+  // un borrado suave que se pueda deshacer desde la UI.
+  async function cancelAssignment() {
+    if (!client?.assignment_id) return;
+    if (!confirm(`¿Cancelar el plan "${client.assignment_name ?? ""}" de ${client.full_name}?`)) return;
+
+    setCancelling(true);
+    setError(null);
+    try {
+      const res = await apiFetch(`/v1/assignments/${client.assignment_id}/cancel`, { method: "POST" });
+      if (!res.ok) throw new Error("No se pudo cancelar el plan");
+      setClient({ ...client, has_assignment: false, assignment_id: undefined, assignment_name: undefined });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error desconocido");
+    } finally {
+      setCancelling(false);
+    }
+  }
 
   const exerciseName = (exerciseId: string) =>
     catalog.find((e) => e.id === exerciseId)?.name ?? exerciseId.slice(0, 8);
@@ -105,6 +127,17 @@ export default function ClientDetailPage() {
             <StatCard label="Último entreno" value={formatLastSession(client.last_session_at)} />
             <StatCard label="Racha" value={`${client.streak_days} días`} />
             <StatCard label="PRs (14d)" value={String(client.recent_prs)} />
+          </div>
+        )}
+
+        {client?.has_assignment && client.assignment_id && (
+          <div className="flex items-center gap-3">
+            <Button variant="outline" size="sm" onClick={cancelAssignment} disabled={cancelling}>
+              {cancelling ? "Cancelando…" : "Cancelar plan"}
+            </Button>
+            <span className="text-sm text-muted-foreground">
+              El cliente queda sin plan activo y podrás asignarle otro.
+            </span>
           </div>
         )}
 

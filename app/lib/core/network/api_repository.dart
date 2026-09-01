@@ -156,6 +156,11 @@ class ApiRepository {
     return (res.data as List).map((s) => SetLogPoint.fromJson(s)).toList();
   }
 
+  Future<List<VolumePoint>> volumeSeries({int days = 90}) async {
+    final res = await _dio.get('/v1/progress/volume', queryParameters: {'days': days});
+    return (res.data as List).map((v) => VolumePoint.fromJson(v)).toList();
+  }
+
   Future<void> logBodyMetric({required String measuredOn, double? weightKg, double? bodyFatPct, String? note}) async {
     await _dio.post('/v1/body-metrics', data: {
       'measured_on': measuredOn,

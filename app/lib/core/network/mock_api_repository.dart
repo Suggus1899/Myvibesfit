@@ -174,6 +174,16 @@ class MockApiRepository implements ApiRepository {
       ].map((j) => PersonalRecordInfo.fromJson(j)).toList();
 
   @override
+  Future<List<VolumePoint>> volumeSeries({int days = 90}) async => List.generate(
+        10,
+        (i) => VolumePoint.fromJson({
+          'session_id': 'mock-session-$i',
+          'started_at': _daysAgo((9 - i) * 7).toIso8601String(),
+          'total_volume_kg': 4200 + i * 180.0,
+        }),
+      );
+
+  @override
   Future<List<SetLogPoint>> exerciseHistory(String exerciseId) async {
     final base = 60 + exerciseId.hashCode % 20;
     return List.generate(8, (i) {

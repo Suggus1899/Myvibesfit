@@ -67,7 +67,7 @@ export default function SuggestionsPage() {
       return;
     }
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [router]);
 
   async function review(id: string, action: "approve" | "reject") {

@@ -201,17 +201,14 @@ gimnasio: si cambia de gym, sus fotos lo siguen y el coach anterior deja de verl
 
 ## Impact analysis previo (Definition of Ready, Fase 1)
 
-> **Estado: PENDIENTE.** No se pudo ejecutar el 2026-08-31: el MCP de GitNexus devolvió
-> `CONNECT_TIMEOUT` y el runner CLI falló al arrancar (`EBUSY` sobre el binario nativo). No se
-> sustituye por una estimación: un impact analysis inventado es peor que ninguno.
+Ejecutado el 2026-08-31 con el CLI de GitNexus, una vez recuperada la herramienta.
 
-Símbolos a evaluar antes de escribir código, con `--direction upstream`:
+| Símbolo | Riesgo | Alcance | Epistémico |
+|---|---|---|---|
+| `config.Load` | `LOW` | 1 | `exact` |
+| `NewCoachService` | `LOW` | 1 | `exact` |
 
-| Símbolo | Por qué | Riesgo esperado |
-|---|---|---|
-| `config.Load` / `config.Config` | Se le añaden 4 campos de storage | Bajo: mismo patrón que las de FCM, un solo caller |
-| `NewCoachService` | Gana el listado de fotos compartidas | Bajo por precedente: `NewAssignmentService` dio LOW/exact con un caller |
-| `apphttp.Handlers` | Campo nuevo de handler | Bajo, pero toca el struct que arma `main` |
+Ambos como se esperaba: un solo caller, `cmd/api/main.go`, y el walk resolvió exacto. El diseño
+de §5 no cambia. Queda por evaluar `apphttp.Handlers` cuando se añada el campo del handler, pero
+es el mismo struct que ya crece con cada feature sin incidentes.
 
-Si alguno vuelve `HIGH`/`CRITICAL`, se avisa antes de seguir. Si vuelve `UNKNOWN`, se confirma
-con búsqueda textual: `UNKNOWN` no es "sin callers".

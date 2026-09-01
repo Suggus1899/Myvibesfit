@@ -64,7 +64,7 @@ export default function ProgramsPage() {
       return;
     }
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [router]);
 
   async function handleCreate(e: React.FormEvent) {

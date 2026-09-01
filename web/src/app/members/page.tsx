@@ -63,7 +63,7 @@ export default function MembersPage() {
       return;
     }
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [router]);
 
   async function changeRole(membershipId: string, role: string) {

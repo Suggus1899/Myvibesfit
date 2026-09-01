@@ -10,6 +10,10 @@ import '../../core/theme/app_colors.dart';
 final recordsProvider = FutureProvider.autoDispose<List<PersonalRecordInfo>>(
   (ref) => ref.watch(apiRepositoryProvider).records(),
 );
+final volumeProvider = FutureProvider.autoDispose<List<VolumePoint>>(
+  (ref) => ref.watch(apiRepositoryProvider).volumeSeries(),
+);
+
 final selectedExerciseProvider = StateProvider<String?>((ref) => null);
 final exerciseHistoryProvider = FutureProvider.autoDispose<List<SetLogPoint>>((ref) async {
   final exerciseId = ref.watch(selectedExerciseProvider);
@@ -33,11 +37,7 @@ class ProgressScreen extends ConsumerWidget {
             tooltip: 'Peso y medidas',
             onPressed: () => context.push('/body-metrics'),
           ),
-          IconButton(
-            icon: const Icon(Icons.history),
-            tooltip: 'Historial',
-            onPressed: () => context.push('/history'),
-          ),
+          IconButton(icon: const Icon(Icons.history), tooltip: 'Historial', onPressed: () => context.push('/history')),
         ],
       ),
       body: recordsAsync.when(
@@ -56,9 +56,10 @@ class ProgressScreen extends ConsumerWidget {
           }
           return ListView(
             padding: const EdgeInsets.all(16),
-            children: byExercise.entries
-                .map((entry) => _ExerciseRecordsCard(exerciseId: entry.key, records: entry.value))
-                .toList(),
+            children: [
+              const _VolumeCard(),
+              ...byExercise.entries.map((entry) => _ExerciseRecordsCard(exerciseId: entry.key, records: entry.value)),
+            ],
           );
         },
         loading: () => const Center(child: CircularProgressIndicator()),
@@ -156,6 +157,80 @@ class _ExerciseChart extends ConsumerWidget {
           ),
         );
       },
+      loading: () => const SizedBox(height: 40, child: Center(child: CircularProgressIndicator(strokeWidth: 2))),
+      error: (e, _) => const SizedBox.shrink(),
+    );
+  }
+}
+
+/// Volumen total por sesion de los ultimos 90 dias. Viene del servidor y no
+/// del store local a proposito: Drift solo guarda lo que sincronizo *este*
+/// telefono, asi que el historico se cortaria al cambiar de dispositivo.
+class _VolumeCard extends ConsumerWidget {
+  const _VolumeCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final colors = context.colors;
+    final volumeAsync = ref.watch(volumeProvider);
+
+    return volumeAsync.when(
+      data: (points) {
+        if (points.length < 2) return const SizedBox.shrink();
+
+        final sorted = [...points]..sort((a, b) => a.startedAt.compareTo(b.startedAt));
+        final total = sorted.fold<double>(0, (sum, p) => sum + p.totalVolumeKg);
+        final spots = <FlSpot>[for (var i = 0; i < sorted.length; i++) FlSpot(i.toDouble(), sorted[i].totalVolumeKg)];
+
+        return Card(
+          margin: const EdgeInsets.only(bottom: 12),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Volumen', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 2),
+                Semantics(
+                  label: 'Volumen total de los ultimos 90 dias',
+                  value: '${total.toStringAsFixed(0)} kilos en ${sorted.length} sesiones',
+                  child: ExcludeSemantics(
+                    child: Text(
+                      '${total.toStringAsFixed(0)} kg en ${sorted.length} sesiones',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  height: 140,
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: LineChart(
+                      LineChartData(
+                        gridData: const FlGridData(show: false),
+                        titlesData: const FlTitlesData(show: false),
+                        borderData: FlBorderData(show: false),
+                        lineBarsData: [
+                          LineChartBarData(
+                            spots: spots,
+                            isCurved: true,
+                            color: colors.brand,
+                            barWidth: 3,
+                            dotData: const FlDotData(show: false),
+                            belowBarData: BarAreaData(show: true, color: colors.brand.withValues(alpha: .12)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+      // Sin datos de volumen la pantalla sigue siendo util: los records estan
+      // debajo y no dependen de esta llamada.
       loading: () => const SizedBox(height: 40, child: Center(child: CircularProgressIndicator(strokeWidth: 2))),
       error: (e, _) => const SizedBox.shrink(),
     );

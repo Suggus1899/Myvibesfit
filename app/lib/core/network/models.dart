@@ -150,6 +150,20 @@ class SetLogPoint {
         performedAt = j['performed_at'];
 }
 
+/// Serie de volumen por sesion que devuelve GET /v1/progress/volume. No se
+/// calcula en local: Drift solo guarda lo que sincronizo *este* telefono, asi
+/// que el historico completo tiene que venir del servidor.
+class VolumePoint {
+  final String sessionId;
+  final DateTime startedAt;
+  final double totalVolumeKg;
+
+  VolumePoint.fromJson(Map<String, dynamic> j)
+      : sessionId = j['session_id'],
+        startedAt = DateTime.parse(j['started_at']),
+        totalVolumeKg = (j['total_volume_kg'] as num).toDouble();
+}
+
 class ClientProfile {
   final String sex;
   final double? heightCm;

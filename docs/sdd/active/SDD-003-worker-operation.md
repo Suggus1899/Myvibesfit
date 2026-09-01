@@ -121,6 +121,9 @@ treinta segundos por noche es el peor candidato posible para eso.
 
 - **`cmd/worker/main.go`:** parseo del subcomando, `runSuggestions` y `runStreaks` separadas,
   resumen final y ping opcional.
+- **`internal/domain/`:** port nuevo `StreakReminderRepository` con un solo método,
+  `ListStreaksAtRisk`. **No** se amplía `GamificationRepository` — ver el impact analysis
+  al final de este documento.
 - **`internal/service/`:** `StreakReminderService`, que consume `ListStreaksAtRisk` y llama a
   `NotificationService.NotifyUser` con `domain.StreakAtRiskNotification`, ya escrita en SDD-001.
 - **`api/db/migrations/0006_streak_reminder.sql`:** la columna `last_reminder_sent_on`.
@@ -152,14 +155,24 @@ noche.
 
 ## Impact analysis previo (Definition of Ready, Fase 1)
 
-> **Estado: PENDIENTE**, por la misma indisponibilidad de herramienta del 2026-08-31 descrita en
-> SDD-002. Que este documento *proponga* gates de GitNexus y no haya podido ejecutarlos es
-> justamente por qué §5 de la metodología ahora exige el fallback CLI.
+Ejecutado el 2026-08-31 con el CLI de GitNexus, una vez recuperada la herramienta.
 
-| Símbolo | Por qué | Riesgo esperado |
-|---|---|---|
-| `main` (`cmd/worker`) | Pasa a despachar subcomandos | Bajo: binario sin importadores |
-| `SuggestionWorkerService` | Se reutiliza desde `runSuggestions` | Bajo: un solo caller hoy |
-| `GamificationRepository` | Gana la lectura de rachas en riesgo | **A verificar**: es un port con varios implementadores y entra en `TxRepos` |
+| Símbolo | Riesgo | Alcance | Epistémico |
+|---|---|---|---|
+| `SuggestionWorkerService` | `LOW` | 2 | `exact` |
+| `GamificationRepository` | **`CRITICAL`** | **56** | `lower-bound` |
 
-El tercero es el único que puede sorprender, y es el que hay que mirar primero.
+**El resultado cambia el diseño de §5.** Este documento proponía añadir `ListStreaksAtRisk` a
+`GamificationRepository`. Ese port tiene **56 dependientes upstream** y entra en `TxRepos`;
+además `lower-bound` significa que 56 es un piso, no el total. Ampliarlo por una query de lectura
+que nada tiene que ver con XP ni logros repetiría exactamente el olor que §6 ya registra sobre
+`AISuggestionRepository`: un port que acumula agregados ajenos.
+
+**Decisión corregida:** `ListStreaksAtRisk` va en un port nuevo y estrecho,
+`StreakReminderRepository`, con ese único método. Una interfaz nueva no tiene implementadores
+previos que romper, el radio de impacto es cero, y el port queda del tamaño de su caso de uso.
+`GamificationRepository` no se toca.
+
+Esta corrección es el argumento a favor del gate: la alternativa era descubrir los 56 callers
+después de haber escrito el código.
+
