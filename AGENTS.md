@@ -20,7 +20,18 @@ Fases 0-10 de [PHASES.md](./docs/PHASES.md) construidas, **más el cierre de
 la cadena de producto** (ver abajo). Lo que falta para producción real
 requiere un VPS.
 
-**Metodología SDD actualizada (2026-08-31):** Se añadieron Definition of Ready/Done por fase, gates obligatorios `gitnexus impact()` + `detect_changes()`, cobertura mínima de tests (handlers, services, Flutter), y tooling obligatorio (GitNexus, Context7, Skills). Ver [docs/SDD_METHODOLOGY.md](./docs/SDD_METHODOLOGY.md) y [docs/sdd/README.md](./docs/sdd/README.md).
+**Este repo trabaja spec-first (2026-08-31).** Una feature no trivial se especifica en
+`docs/sdd/active/` antes de escribirla. La metodología define 5 fases con Definition of
+Ready/Done y gates de GitNexus.
+
+Los gates se revisaron contra el código el mismo día, y **los que el repo no podía pasar
+bajaron a objetivo** en vez de quedar como requisitos que todo el mundo ignora: la auditoría
+cubre 4 mutaciones, no 8, y los tests de handler son meta (hoy hay cero; el gate real es el
+middleware). Lo aspiracional vive en §6 con su trigger. Ver
+[docs/SDD_METHODOLOGY.md](./docs/SDD_METHODOLOGY.md) y [docs/sdd/README.md](./docs/sdd/README.md).
+
+`api/internal/docs` contrasta tres afirmaciones de la metodología con el código en cada
+`go test ./...`. Existe porque el documento ya afirmó tres veces cosas que el código desmentía.
 
 ### La cadena de producto ya está cerrada
 
@@ -191,6 +202,12 @@ Tailwind v4 + shadcn/ui, `pnpm lint` y `pnpm build` limpios:
   - Handlers HTTP: **objetivo, no gate** — hoy hay cero; el gate real es el middleware
   - Flutter: router/redirects, `AuthController`, cola de sync, `WorkoutStore`
 
+- **Docs**: `internal/docs` contrasta tres marcadores de
+  `docs/SDD_METHODOLOGY.md` (acciones auditadas, campos de `TxRepos`, tablas
+  sin uso) contra el código. Si la metodología se desactualiza,
+  `go test ./...` falla con el arreglo en el mensaje. No es ceremonia: ese
+  documento ya afirmó tres veces cosas que el código desmentía.
+
 ## Deuda conocida (diagnosticada, no arreglada)
 
 Auditorías previas (go-reviewer, architect, database-reviewer) dejaron esto
@@ -258,22 +275,34 @@ las capas) a ports & adapters, a pedido explícito del usuario. `internal/domain
 no importa `pgx`/sqlc/`anthropic-sdk` — solo stdlib + `google/uuid`:
 
 - `internal/domain/`: entidades (`Program`, `Assignment`, `WorkoutSession`,
-  etc.), los 11 ports (`ProgramRepository`, `AssignmentRepository`,
-  `SessionRepository`, `GamificationRepository`, `HabitRepository`,
-  `ProgressRepository`, `CoachRepository`, `AISuggestionRepository`,
-  `ExerciseRepository`, `IdentityRepository`, `AuditRepository`), el
-  `UnitOfWork` (`TxRepos{Assignments,Sessions,Gamification,Habits}` — para
-  las 3 transacciones multi-agregado: `Assign`, `SyncSessions`, `LogHabit`),
-  y `GamificationService` (domain service sin estado propio, recibe el port
-  por parámetro para poder participar en la tx de quien lo llama).
+  `DeviceToken`, etc.), **13 ports de repositorio** (`ProgramRepository`,
+  `AssignmentRepository`, `SessionRepository`, `GamificationRepository`,
+  `HabitRepository`, `ProgressRepository`, `CoachRepository`,
+  `AISuggestionRepository`, `ExerciseRepository`, `IdentityRepository`,
+  `AuditRepository`, `ProfileRepository`, `DeviceTokenRepository`), dos ports
+  de integración (`SuggestionProposer` hacia Claude, `PushSender` hacia FCM),
+  el `UnitOfWork` con
+  `TxRepos{Assignments,Sessions,Gamification,Habits,Coaches,Suggestions}` —
+  para las **4** transacciones multi-agregado: `Assign`, `SyncSessions`,
+  `LogHabit` y `AISuggestionService.Review` — y `GamificationService` (domain
+  service sin estado propio, recibe el port por parámetro para poder
+  participar en la tx de quien lo llama).
 - `internal/service/`: casos de uso — dependen solo de ports de `domain`,
   cero imports de `pgx`/`internal/repository/db` (verificado con grep, debe
   seguir dando cero).
-- `internal/adapter/postgres/`: implementa los 11 ports envolviendo
+- `internal/adapter/postgres/`: implementa los 13 ports envolviendo
   `internal/repository/db` (sqlc, sin tocar — sigue siendo el único lugar
   con `pgtype`). Traduce `pgx.ErrNoRows` → `domain.ErrNotFound` en cada
   adapter — si un adapter nuevo lo olvida, un flujo que tolera "sin fila
   todavía" (usuario nuevo sin `user_stats`) rompe en silencio.
+- `internal/adapter/push/`: implementa `domain.PushSender`. `fcm.go` habla el
+  HTTP v1 de FCM sobre `net/http` + `oauth2/google`; se descartó
+  firebase-admin-go porque arrastraba grpc, protobuf y appengine para enviar
+  un mensaje. `noop.go` es lo que se cablea sin `FCM_CREDENTIALS_JSON`, para
+  que el desarrollo local no dependa de una cuenta de Firebase.
+- `internal/progression/`: motor puro sin BD. **Ya tiene llamador**:
+  `SyncService` lo usa (`sync.go:11`) para progresar la próxima ocurrencia
+  del ejercicio en cada sesión sincronizada.
 - `internal/adapter/anthropic/`: implementa `domain.SuggestionProposer`
   (antes `internal/ai`, ya no existe).
 - `internal/transport/http/handler/`: sin cambios estructurales, solo las
@@ -286,14 +315,24 @@ no importa `pgx`/sqlc/`anthropic-sdk` — solo stdlib + `google/uuid`:
   (`ExperienceLevel`, `TrainingGoal`, `MemberRole`, etc.) quedan `string`
   plano porque ningún service rama sobre su valor.
 
-Verificado con `go build/vet/test` limpios después de cada fase (identidad
-→ catálogo/programas → ejecución/gamificación → IA/worker → cleanup). **No
-se probó end-to-end contra un servidor corriendo** (`go run ./cmd/api`)
-porque esta sesión corrió sin levantar el backend a pedido del usuario — la
-próxima sesión que levante el servidor debería ejercitar el camino crítico
-(login, crear+publicar programa, asignar, sincronizar una sesión con
-series, marcar un hábito, aprobar una sugerencia) y confirmar respuestas
-JSON idénticas a las de antes del refactor.
+Verificado con `go build/vet/test` limpios después de cada fase. **Y también
+en vivo contra Postgres real y el servidor levantado**, que es donde
+aparecieron los bugs que la suite no vio:
+
+- El XP de `personal_record` se otorgaba en *cada* resincronización.
+  `estimated_1rm` calculaba 93.3333 pero la columna es `numeric(8,2)` y
+  guardaba 93.33, así que el récord se superaba a sí mismo para siempre. El
+  test unitario no lo vio porque el fake devolvía una lista de récords vacía.
+- `habit_log` devolvía un 500 filtrando el nombre de la constraint al segundo
+  check-in del mismo día con otro `client_local_id`.
+- El traspaso de un `device_token` entre dos usuarios en el mismo teléfono:
+  verificado que deja **una** fila y cambia de dueño, y que un `INSERT` plano
+  ahí falla con `23505`.
+
+La lección, que vale para la próxima sesión: **compilar no es verificar**. El
+camino crítico (login, crear+publicar programa, asignar, sincronizar sesión
+con series, marcar hábito, aprobar sugerencia) se ejercita contra el servidor,
+no solo con fakes.
 
 ## Convenciones
 
@@ -320,7 +359,9 @@ cd ../web && pnpm dev            # panel del coach + landing en :3000
 ```
 
 El worker de IA es una **pasada única**, pensado para cron (no tiene
-scheduler embebido). Necesita `ANTHROPIC_API_KEY`:
+scheduler embebido). Necesita `ANTHROPIC_API_KEY`. El cron en sí, los
+subcomandos y la pasada de rachas están especificados en
+[SDD-003](./docs/sdd/active/SDD-003-worker-operation.md), todavía sin implementar:
 
 ```bash
 cd api && go run ./cmd/worker    # una corrida; en el VPS va en crontab nocturno
@@ -333,7 +374,7 @@ y `gofmt -l .` (API) · `pnpm lint && pnpm build` (panel) ·
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **Myvibesfit** (4531 symbols, 10744 relationships, 359 execution flows).
+This project is indexed by GitNexus as **Myvibesfit** (5,658 nodes, 13,837 relationships, 408 execution flows).
 
 > Index stale? Run `node .gitnexus/run.cjs analyze --index-only` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? Bootstrap with `npx`, `bunx`, or `pnpm dlx` — e.g. `bunx gitnexus@latest analyze` (npm 11 npx crash; #1939).
 

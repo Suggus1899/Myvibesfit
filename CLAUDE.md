@@ -16,6 +16,7 @@ go run ./cmd/api                                                  # server, :808
 go run ./cmd/worker                                               # one-shot AI-suggestion pass, needs ANTHROPIC_API_KEY
 go vet ./... && go test ./... && go build ./... && gofmt -l .    # verify before commit
 go test ./internal/progression/...                                # single package, e.g.
+go test ./internal/docs/...                                        # fails if docs/SDD_METHODOLOGY.md drifts from the code
 
 # Coach panel (web/) — Next.js 16 + TS + Tailwind + shadcn, pnpm
 cd web && pnpm dev      # :3000
@@ -31,21 +32,39 @@ flutter run -d chrome                       # or web-server; visually confirm UI
 Multi-tenant gym training app: coach designs/supervises programs, client trains from mobile. A deterministic progression engine drives set-by-set load/rep suggestions; an AI worker layers supervised suggestions on top (never auto-applied — coach approves/rejects).
 
 - **`api/`** — Go, **hexagonal (ports & adapters)**, migrated from a coupled `handler → service → repository` deliberately at the user's request:
-  - `internal/domain/` — entities, 11 repository ports, `UnitOfWork`/`TxRepos` for the 3 multi-aggregate transactions (`Assign`, `SyncSessions`, `LogHabit`). No `pgx`/sqlc/anthropic-sdk imports — stdlib + `google/uuid` only.
+  - `internal/domain/` — entities, **13** repository ports plus two integration ports (`SuggestionProposer`, `PushSender`), and `UnitOfWork`/`TxRepos` (6 fields) for the **4** multi-aggregate transactions: `Assign`, `SyncSessions`, `LogHabit`, `AISuggestionService.Review`. No `pgx`/sqlc/anthropic-sdk imports — stdlib + `google/uuid` only.
   - `internal/service/` — use cases; depend only on `domain` ports (verified with grep to have zero `pgx`/db imports).
   - `internal/adapter/postgres/` — implements the ports over `internal/repository/db` (sqlc-generated, the only layer touching `pgtype`); translates `pgx.ErrNoRows` → `domain.ErrNotFound`.
   - `internal/adapter/anthropic/` — implements `domain.SuggestionProposer` (Claude tool-use call for AI suggestions).
+  - `internal/adapter/push/` — implements `domain.PushSender`. `fcm.go` speaks the FCM HTTP v1 API over `net/http` + `oauth2/google` (the firebase-admin SDK was rejected: it pulled grpc, protobuf and appengine to send one message). `noop.go` is wired when `FCM_CREDENTIALS_JSON` is unset, so local dev needs no Firebase account.
   - `internal/transport/http/` — chi router, handlers, DTOs, JWT auth + RBAC middleware.
-  - `internal/progression/` — pure, DB-free progression engine (4 strategies, table-driven tests); not yet wired into any service flow.
+  - `internal/progression/` — pure, DB-free progression engine (4 strategies, table-driven tests). **Wired into `SyncService`** (`internal/service/sync.go:11`): each synced session progresses the next occurrence of that exercise. An `override_source = ai_suggestion` on the target is honoured once and then consumed.
   - `cmd/api` (HTTP server) and `cmd/worker` (single-pass AI suggestion generator, meant for cron — no embedded scheduler).
 - **`web/`** — Next.js App Router coach panel; talks to the API via `src/lib/api.ts` (JWT in `localStorage`, auto-refresh on 401).
 - **`app/`** — Flutter client app; go_router with an auth-session guard, Drift for offline persistence on native (in-memory fallback on web).
 - **`docs/ARCHITECTURE.md`**, **`docs/DESIGN.md`**, **`docs/PHASES.md`** — decision log, design tokens/theming, phased build plan.
+- **`docs/SDD_METHODOLOGY.md`** + **`docs/sdd/`** — this repo works spec-first. Non-trivial features get an SDD in `docs/sdd/active/` **before** code (template `01_FEATURE_SDD.md`, or `02_ADR_ARCHITECTURE.md` for a decision without a feature). Three exist: SDD-001 push notifications, SDD-002 progress photos, SDD-003 worker operation.
+
+## When GitNexus is unavailable
+
+Both paths failed repeatedly on 2026-08-31: the MCP server returned `CONNECT_TIMEOUT`, and the
+CLI runner died with `EBUSY` re-copying its native binary (a stale `node` process holds it; check
+with `tasklist | grep node` before killing anything — some of those are the user's dev servers).
+
+The gates below stay mandatory. When neither path runs:
+
+1. **Say so, out loud.** In the reply, and in the commit message if you commit. Never present a
+   skipped analysis as a clean one, and never invent a risk level — a fabricated impact analysis
+   is worse than an absent one.
+2. **Fall back to a text search** (`grep -rn "SymbolName" api/`) and label it as such. It answers
+   "who mentions this", not "what breaks".
+3. **Judge by what the change touches.** Docs and `_test.go` files change no production symbol —
+   say that and proceed. Anything else: ask the user before committing.
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **Myvibesfit** (4531 symbols, 10744 relationships, 359 execution flows).
+This project is indexed by GitNexus as **Myvibesfit** (5,658 nodes, 13,837 relationships, 408 execution flows).
 
 > Index stale? Run `node .gitnexus/run.cjs analyze --index-only` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? Bootstrap with `npx`, `bunx`, or `pnpm dlx` — e.g. `bunx gitnexus@latest analyze` (npm 11 npx crash; #1939).
 
