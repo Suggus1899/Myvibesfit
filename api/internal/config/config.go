@@ -48,6 +48,18 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("JWT_ACCESS_SECRET is required")
 	}
 
+	// En produccion el secreto de desarrollo es peor que ninguno: los tokens
+	// quedan falsificables por cualquiera que haya leido el repo. Falla al
+	// arrancar en vez de servir trafico con sesiones forjables.
+	if cfg.Env == "production" {
+		if strings.Contains(cfg.JWTAccessSecret, "dev-local") {
+			return nil, fmt.Errorf("JWT_ACCESS_SECRET es el de desarrollo; genera uno real para produccion")
+		}
+		if len(cfg.JWTAccessSecret) < 32 {
+			return nil, fmt.Errorf("JWT_ACCESS_SECRET debe tener al menos 32 caracteres en produccion, tiene %d", len(cfg.JWTAccessSecret))
+		}
+	}
+
 	accessMinutes, err := strconv.Atoi(getEnv("JWT_ACCESS_TTL_MINUTES", "15"))
 	if err != nil {
 		return nil, fmt.Errorf("invalid JWT_ACCESS_TTL_MINUTES: %w", err)

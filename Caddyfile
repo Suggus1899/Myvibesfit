@@ -1,0 +1,32 @@
+# Caddy resuelve el certificado con Let's Encrypt solo: no hay certbot, ni
+# renovacion en cron, ni un cron que se olvide de recargar nginx. A cambio, los
+# dos dominios tienen que apuntar por DNS a este servidor antes de levantarlo.
+
+{$API_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy api:8080
+
+	log {
+		output stdout
+		format json
+	}
+}
+
+{$PANEL_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy web:3000
+
+	# El panel guarda el JWT en localStorage, asi que un XSS vale una sesion.
+	# Estas cabeceras no lo arreglan, pero suben el coste de explotarlo.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "DENY"
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

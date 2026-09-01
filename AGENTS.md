@@ -11,6 +11,7 @@ supervisadas por el coach.
 - [docs/DESIGN.md](./docs/DESIGN.md) — tokens de color, tipografía, componentes,
   mapeo a Flutter `ThemeExtension`
 - [docs/PHASES.md](./docs/PHASES.md) — plan de desarrollo por fases
+- [docs/DEPLOY.md](./docs/DEPLOY.md) — puesta en marcha en un VPS con docker compose: orden de arranque, lo que hay que cambiar del `.env` y qué queda cerrado a propósito
 - [docs/SDD_METHODOLOGY.md](./docs/SDD_METHODOLOGY.md) — **metodología SDD actualizada** (5 fases con Definition of Ready/Done, gates obligatorios GitNexus, cobertura de tests, tooling)
 - [docs/sdd/README.md](./docs/sdd/README.md) — catálogo de plantillas + SDDs activos (SDD-001/002/003)
 

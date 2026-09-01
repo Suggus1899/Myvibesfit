@@ -6,8 +6,10 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-myvibesfit}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-myvibesfit}
       POSTGRES_DB: ${POSTGRES_DB:-myvibesfit}
+    # Solo loopback: los demas servicios llegan por la red de compose. Publicar
+    # 5433 al mundo dejaba Postgres accesible desde fuera del VPS.
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
@@ -16,13 +18,17 @@ services:
       timeout: 3s
       retries: 10
 
-  adminer:
-    image: adminer:latest
-    restart: unless-stopped
-    ports:
-      - "8081:8080"
+  # Aplica las migraciones y sale. La API espera a que termine bien, asi que es
+  # imposible arrancar sirviendo trafico contra un esquema viejo.
+  migrate:
+    build: ./api
+    entrypoint: ["sh", "-c", "goose -dir /migrations postgres \"$$DATABASE_URL\" up"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-myvibesfit}:${POSTGRES_PASSWORD:-myvibesfit}@db:5432/${POSTGRES_DB:-myvibesfit}?sslmode=disable
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+    restart: "no"
 
   api:
     build: ./api
@@ -30,11 +36,71 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-myvibesfit}:${POSTGRES_PASSWORD:-myvibesfit}@db:5432/${POSTGRES_DB:-myvibesfit}?sslmode=disable
-    ports:
-      - "8080:8080"
+      ENV: ${ENV:-production}
+    # Caddy la alcanza por la red interna; no hace falta exponerla al host.
+    expose:
+      - "8080"
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  web:
+    build:
+      context: ./web
+      args:
+        # De build, no de runtime: Next inlinea NEXT_PUBLIC_* en el bundle.
+        NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:?define PUBLIC_API_URL, por ejemplo https://api.tu-dominio.com}
+    restart: unless-stopped
+    expose:
+      - "3000"
+    depends_on:
+      - api
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?define API_DOMAIN}
+      PANEL_DOMAIN: ${PANEL_DOMAIN:?define PANEL_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+      - web
+
+  # El worker es una pasada unica (SDD-003): no es un servicio que viva, es un
+  # comando que el cron del host invoca. El profile evita que `up` lo arranque.
+  worker:
+    build: ./api
+    profiles: ["cli"]
+    entrypoint: ["worker"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-myvibesfit}:${POSTGRES_PASSWORD:-myvibesfit}@db:5432/${POSTGRES_DB:-myvibesfit}?sslmode=disable
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  # Un administrador de base de datos sin autenticacion delante no puede
+  # arrancar solo: hay que pedirlo con --profile debug.
+  adminer:
+    image: adminer:latest
+    profiles: ["debug"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8081:8080"
+    depends_on:
+      - db
 
 volumes:
   db_data:
+  caddy_data:
+  caddy_config:
