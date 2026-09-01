@@ -45,13 +45,32 @@ Multi-tenant gym training app: coach designs/supervises programs, client trains 
 - **`docs/ARCHITECTURE.md`**, **`docs/DESIGN.md`**, **`docs/PHASES.md`** — decision log, design tokens/theming, phased build plan.
 - **`docs/SDD_METHODOLOGY.md`** + **`docs/sdd/`** — this repo works spec-first. Non-trivial features get an SDD in `docs/sdd/active/` **before** code (template `01_FEATURE_SDD.md`, or `02_ADR_ARCHITECTURE.md` for a decision without a feature). Three exist: SDD-001 push notifications, SDD-002 progress photos, SDD-003 worker operation.
 
-## When GitNexus is unavailable
+## When the GitNexus runner fails to start
 
-Both paths failed repeatedly on 2026-08-31: the MCP server returned `CONNECT_TIMEOUT`, and the
-CLI runner died with `EBUSY` re-copying its native binary (a stale `node` process holds it; check
-with `tasklist | grep node` before killing anything — some of those are the user's dev servers).
+`.gitnexus/run.cjs` reinstalls its dependencies on every invocation. When the **gitnexus MCP
+server is running**, it holds `lbugjs.node` open, the reinstall cannot overwrite it, and every
+command dies with `EBUSY` / `EPERM`. The same hung process is usually why the MCP tools return
+`CONNECT_TIMEOUT`, so both paths appear broken at once from a single cause.
 
-The gates below stay mandatory. When neither path runs:
+**Do not kill the MCP server for this.** The package is already extracted on disk; invoke its CLI
+directly and no install step runs:
+
+```bash
+# find it once, then reuse the path
+ls -d "$LOCALAPPDATA"/npm-cache/_npx/*/node_modules/gitnexus 2>/dev/null || \
+  ls -d F:/Proyectos/.caches/npm/_npx/*/node_modules/gitnexus
+
+G="F:/Proyectos/.caches/npm/_npx/5e786f48223a616c/node_modules/gitnexus/dist/cli/index.js"
+node "$G" analyze --index-only .                                    # path is POSITIONAL here
+node "$G" detect-changes --scope all --repo Myvibesfit               # --repo is REQUIRED: 11 repos indexed
+node "$G" impact "SymbolName" --direction upstream --repo Myvibesfit
+```
+
+Two flag differences from `run.cjs`: `analyze` takes the path as a positional argument (no
+`--repo`), and every other command **requires** `--repo Myvibesfit` because this machine has
+eleven repositories in one index.
+
+If even that fails, then and only then:
 
 1. **Say so, out loud.** In the reply, and in the commit message if you commit. Never present a
    skipped analysis as a clean one, and never invent a risk level — a fabricated impact analysis
@@ -64,7 +83,7 @@ The gates below stay mandatory. When neither path runs:
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **Myvibesfit** (5,658 nodes, 13,837 relationships, 408 execution flows).
+This project is indexed by GitNexus as **Myvibesfit** (5,691 nodes, 13,887 relationships, 408 execution flows).
 
 > Index stale? Run `node .gitnexus/run.cjs analyze --index-only` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? Bootstrap with `npx`, `bunx`, or `pnpm dlx` — e.g. `bunx gitnexus@latest analyze` (npm 11 npx crash; #1939).
 
