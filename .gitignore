@@ -18,3 +18,11 @@ web/.next/
 # OS
 .DS_Store
 Thumbs.db
+# Local environment files
+.env.*
+!.env.example
+!.env.*.example
+!.env.sample
+!.env.*.sample
+!.env.template
+!.env.*.template
